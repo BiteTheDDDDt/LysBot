@@ -1,0 +1,31 @@
+# Private configuration and runtime data
+.env
+.env.*
+!.env.example
+!.env.*.example
+data/
+*.db
+*.db-wal
+*.db-shm
+*.log
+logs/
+# Private local plugins
+extensions/*
+!extensions/.gitkeep
+# Development artifacts
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+build/
+dist/
+.ruff_cache/
+.pytest_cache/
+.tmp/
+.agents/
+.codex/
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

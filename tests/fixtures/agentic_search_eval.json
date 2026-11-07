@@ -1,0 +1,1407 @@
+{
+  "description": "80 synthetic Chinese evaluation questions; fictional products prevent pretraining answers. Retrieval seeds are evaluation inputs only and never enter the autonomous agent prompt.",
+  "messages": [
+    {
+      "id": 1,
+      "sender_id": 1001,
+      "name": "小禾",
+      "content": "打算买 星砂 G1 显卡，还没下单。",
+      "timestamp": "2026-08-01T10:00:00"
+    },
+    {
+      "id": 2,
+      "sender_id": 2001,
+      "name": "顾问1",
+      "content": "我推荐 星砂 G2，规格是 24GB 显存。推荐理由是显存更大。",
+      "timestamp": "2026-08-01T11:00:00"
+    },
+    {
+      "id": 3,
+      "sender_id": 1001,
+      "name": "小禾",
+      "content": "最终买了 星砂 G2。没有买 星砂 G1。",
+      "timestamp": "2026-09-01T12:00:00"
+    },
+    {
+      "id": 4,
+      "sender_id": 3001,
+      "name": "旁人1",
+      "content": "我买的是 星砂 G1。听说它更好。",
+      "timestamp": "2026-09-01T12:01:00"
+    },
+    {
+      "id": 5,
+      "sender_id": 1001,
+      "name": "小禾",
+      "content": "朋友说 星砂 G1 不错，但我没有试用过。",
+      "timestamp": "2026-09-01T13:00:00"
+    },
+    {
+      "id": 11,
+      "sender_id": 1002,
+      "name": "小岚",
+      "content": "打算买 月桥 H1 耳机，还没下单。",
+      "timestamp": "2026-08-02T10:00:00"
+    },
+    {
+      "id": 12,
+      "sender_id": 2002,
+      "name": "顾问2",
+      "content": "我推荐 月桥 H2，规格是 32 小时续航。推荐理由是续航更长。",
+      "timestamp": "2026-08-02T11:00:00"
+    },
+    {
+      "id": 13,
+      "sender_id": 1002,
+      "name": "小岚",
+      "content": "最终买了 月桥 H2。没有买 月桥 H1。",
+      "timestamp": "2026-09-02T12:00:00"
+    },
+    {
+      "id": 14,
+      "sender_id": 3002,
+      "name": "旁人2",
+      "content": "我买的是 月桥 H1。听说它更好。",
+      "timestamp": "2026-09-02T12:01:00"
+    },
+    {
+      "id": 15,
+      "sender_id": 1002,
+      "name": "小岚",
+      "content": "朋友说 月桥 H1 不错，但我没有试用过。",
+      "timestamp": "2026-09-02T13:00:00"
+    },
+    {
+      "id": 21,
+      "sender_id": 1003,
+      "name": "小澄",
+      "content": "打算买 竹影 K1 键盘，还没下单。",
+      "timestamp": "2026-08-03T10:00:00"
+    },
+    {
+      "id": 22,
+      "sender_id": 2003,
+      "name": "顾问3",
+      "content": "我推荐 竹影 K2，规格是 84 键。推荐理由是方便携带。",
+      "timestamp": "2026-08-03T11:00:00"
+    },
+    {
+      "id": 23,
+      "sender_id": 1003,
+      "name": "小澄",
+      "content": "最终买了 竹影 K2。没有买 竹影 K1。",
+      "timestamp": "2026-09-03T12:00:00"
+    },
+    {
+      "id": 24,
+      "sender_id": 3003,
+      "name": "旁人3",
+      "content": "我买的是 竹影 K1。听说它更好。",
+      "timestamp": "2026-09-03T12:01:00"
+    },
+    {
+      "id": 25,
+      "sender_id": 1003,
+      "name": "小澄",
+      "content": "朋友说 竹影 K1 不错，但我没有试用过。",
+      "timestamp": "2026-09-03T13:00:00"
+    },
+    {
+      "id": 31,
+      "sender_id": 1004,
+      "name": "小南",
+      "content": "打算买 青鸟 C1 相机，还没下单。",
+      "timestamp": "2026-08-04T10:00:00"
+    },
+    {
+      "id": 32,
+      "sender_id": 2004,
+      "name": "顾问4",
+      "content": "我推荐 青鸟 C2，规格是 2400 万像素。推荐理由是镜头更便宜。",
+      "timestamp": "2026-08-04T11:00:00"
+    },
+    {
+      "id": 33,
+      "sender_id": 1004,
+      "name": "小南",
+      "content": "最终买了 青鸟 C2。没有买 青鸟 C1。",
+      "timestamp": "2026-09-04T12:00:00"
+    },
+    {
+      "id": 34,
+      "sender_id": 3004,
+      "name": "旁人4",
+      "content": "我买的是 青鸟 C1。听说它更好。",
+      "timestamp": "2026-09-04T12:01:00"
+    },
+    {
+      "id": 35,
+      "sender_id": 1004,
+      "name": "小南",
+      "content": "朋友说 青鸟 C1 不错，但我没有试用过。",
+      "timestamp": "2026-09-04T13:00:00"
+    },
+    {
+      "id": 41,
+      "sender_id": 1005,
+      "name": "小松",
+      "content": "打算买 海灯 R1 路由器，还没下单。",
+      "timestamp": "2026-08-05T10:00:00"
+    },
+    {
+      "id": 42,
+      "sender_id": 2005,
+      "name": "顾问5",
+      "content": "我推荐 海灯 R2，规格是 2.5G 网口。推荐理由是局域网传输更快。",
+      "timestamp": "2026-08-05T11:00:00"
+    },
+    {
+      "id": 43,
+      "sender_id": 1005,
+      "name": "小松",
+      "content": "最终买了 海灯 R2。没有买 海灯 R1。",
+      "timestamp": "2026-09-05T12:00:00"
+    },
+    {
+      "id": 44,
+      "sender_id": 3005,
+      "name": "旁人5",
+      "content": "我买的是 海灯 R1。听说它更好。",
+      "timestamp": "2026-09-05T12:01:00"
+    },
+    {
+      "id": 45,
+      "sender_id": 1005,
+      "name": "小松",
+      "content": "朋友说 海灯 R1 不错，但我没有试用过。",
+      "timestamp": "2026-09-05T13:00:00"
+    },
+    {
+      "id": 51,
+      "sender_id": 1006,
+      "name": "小沐",
+      "content": "打算买 青苔 D1 显示器，还没下单。",
+      "timestamp": "2026-08-06T10:00:00"
+    },
+    {
+      "id": 52,
+      "sender_id": 2006,
+      "name": "顾问6",
+      "content": "我推荐 青苔 D2，规格是 165Hz 刷新率。推荐理由是动态画面更流畅。",
+      "timestamp": "2026-08-06T11:00:00"
+    },
+    {
+      "id": 53,
+      "sender_id": 1006,
+      "name": "小沐",
+      "content": "最终买了 青苔 D2。没有买 青苔 D1。",
+      "timestamp": "2026-09-06T12:00:00"
+    },
+    {
+      "id": 54,
+      "sender_id": 3006,
+      "name": "旁人6",
+      "content": "我买的是 青苔 D1。听说它更好。",
+      "timestamp": "2026-09-06T12:01:00"
+    },
+    {
+      "id": 55,
+      "sender_id": 1006,
+      "name": "小沐",
+      "content": "朋友说 青苔 D1 不错，但我没有试用过。",
+      "timestamp": "2026-09-06T13:00:00"
+    },
+    {
+      "id": 61,
+      "sender_id": 1007,
+      "name": "小遥",
+      "content": "打算买 白帆 S1 硬盘，还没下单。",
+      "timestamp": "2026-08-07T10:00:00"
+    },
+    {
+      "id": 62,
+      "sender_id": 2007,
+      "name": "顾问7",
+      "content": "我推荐 白帆 S2，规格是 2TB 容量。推荐理由是空间足够。",
+      "timestamp": "2026-08-07T11:00:00"
+    },
+    {
+      "id": 63,
+      "sender_id": 1007,
+      "name": "小遥",
+      "content": "最终买了 白帆 S2。没有买 白帆 S1。",
+      "timestamp": "2026-09-07T12:00:00"
+    },
+    {
+      "id": 64,
+      "sender_id": 3007,
+      "name": "旁人7",
+      "content": "我买的是 白帆 S1。听说它更好。",
+      "timestamp": "2026-09-07T12:01:00"
+    },
+    {
+      "id": 65,
+      "sender_id": 1007,
+      "name": "小遥",
+      "content": "朋友说 白帆 S1 不错，但我没有试用过。",
+      "timestamp": "2026-09-07T13:00:00"
+    },
+    {
+      "id": 71,
+      "sender_id": 1008,
+      "name": "小川",
+      "content": "打算买 回声 M1 麦克风，还没下单。",
+      "timestamp": "2026-08-08T10:00:00"
+    },
+    {
+      "id": 72,
+      "sender_id": 2008,
+      "name": "顾问8",
+      "content": "我推荐 回声 M2，规格是 48kHz 采样率。推荐理由是收音更清晰。",
+      "timestamp": "2026-08-08T11:00:00"
+    },
+    {
+      "id": 73,
+      "sender_id": 1008,
+      "name": "小川",
+      "content": "最终买了 回声 M2。没有买 回声 M1。",
+      "timestamp": "2026-09-08T12:00:00"
+    },
+    {
+      "id": 74,
+      "sender_id": 3008,
+      "name": "旁人8",
+      "content": "我买的是 回声 M1。听说它更好。",
+      "timestamp": "2026-09-08T12:01:00"
+    },
+    {
+      "id": 75,
+      "sender_id": 1008,
+      "name": "小川",
+      "content": "朋友说 回声 M1 不错，但我没有试用过。",
+      "timestamp": "2026-09-08T13:00:00"
+    },
+    {
+      "id": 81,
+      "sender_id": 1009,
+      "name": "小葵",
+      "content": "打算买 晚星 P1 充电器，还没下单。",
+      "timestamp": "2026-08-09T10:00:00"
+    },
+    {
+      "id": 82,
+      "sender_id": 2009,
+      "name": "顾问9",
+      "content": "我推荐 晚星 P2，规格是 100W 功率。推荐理由是能给笔记本供电。",
+      "timestamp": "2026-08-09T11:00:00"
+    },
+    {
+      "id": 83,
+      "sender_id": 1009,
+      "name": "小葵",
+      "content": "最终买了 晚星 P2。没有买 晚星 P1。",
+      "timestamp": "2026-09-09T12:00:00"
+    },
+    {
+      "id": 84,
+      "sender_id": 3009,
+      "name": "旁人9",
+      "content": "我买的是 晚星 P1。听说它更好。",
+      "timestamp": "2026-09-09T12:01:00"
+    },
+    {
+      "id": 85,
+      "sender_id": 1009,
+      "name": "小葵",
+      "content": "朋友说 晚星 P1 不错，但我没有试用过。",
+      "timestamp": "2026-09-09T13:00:00"
+    },
+    {
+      "id": 91,
+      "sender_id": 1010,
+      "name": "小溪",
+      "content": "打算买 云舟 V1 投影仪，还没下单。",
+      "timestamp": "2026-08-10T10:00:00"
+    },
+    {
+      "id": 92,
+      "sender_id": 2010,
+      "name": "顾问10",
+      "content": "我推荐 云舟 V2，规格是 1080p 分辨率。推荐理由是卧室距离合适。",
+      "timestamp": "2026-08-10T11:00:00"
+    },
+    {
+      "id": 93,
+      "sender_id": 1010,
+      "name": "小溪",
+      "content": "最终买了 云舟 V2。没有买 云舟 V1。",
+      "timestamp": "2026-09-10T12:00:00"
+    },
+    {
+      "id": 94,
+      "sender_id": 3010,
+      "name": "旁人10",
+      "content": "我买的是 云舟 V1。听说它更好。",
+      "timestamp": "2026-09-10T12:01:00"
+    },
+    {
+      "id": 95,
+      "sender_id": 1010,
+      "name": "小溪",
+      "content": "朋友说 云舟 V1 不错，但我没有试用过。",
+      "timestamp": "2026-09-10T13:00:00"
+    }
+  ],
+  "cases": [
+    {
+      "id": "01-exact",
+      "kind": "exact",
+      "question": "小禾最终买了哪款显卡？",
+      "seed_query": "小禾",
+      "author_id": 1001,
+      "expected_ids": [
+        3
+      ],
+      "expected_answer": [
+        "星砂 G2"
+      ]
+    },
+    {
+      "id": "01-paraphrase",
+      "kind": "paraphrase",
+      "question": "小禾最后入手的那件设备是什么型号？",
+      "seed_query": "小禾 最终",
+      "author_id": 1001,
+      "expected_ids": [
+        3
+      ],
+      "expected_answer": [
+        "星砂 G2"
+      ]
+    },
+    {
+      "id": "01-attribution",
+      "kind": "attribution",
+      "question": "谁推荐了 星砂 G2？",
+      "seed_query": "星砂 G2",
+      "author_id": 1001,
+      "expected_ids": [
+        2
+      ],
+      "expected_answer": [
+        "顾问1"
+      ]
+    },
+    {
+      "id": "01-time",
+      "kind": "time",
+      "question": "小禾在几月几日确认买了 星砂 G2？",
+      "seed_query": "星砂 G2",
+      "author_id": 1001,
+      "expected_ids": [
+        3
+      ],
+      "expected_answer": [
+        "9月1日"
+      ]
+    },
+    {
+      "id": "01-plan_reality",
+      "kind": "plan_reality",
+      "question": "小禾以前说想买 星砂 G1，后来真买它了吗？",
+      "seed_query": "星砂 G1",
+      "author_id": 1001,
+      "expected_ids": [
+        1,
+        3
+      ],
+      "expected_answer": [
+        "星砂 G2"
+      ]
+    },
+    {
+      "id": "01-multi_hop",
+      "kind": "multi_hop",
+      "question": "小禾实际买的显卡，推荐者提到的规格和理由分别是什么？",
+      "seed_query": "小禾",
+      "author_id": 1001,
+      "expected_ids": [
+        3,
+        2
+      ],
+      "expected_answer": [
+        "24GB 显存",
+        "显存更大"
+      ]
+    },
+    {
+      "id": "01-no_answer",
+      "kind": "no_answer",
+      "question": "小禾实际买的显卡的保修截止日是哪天？",
+      "seed_query": "小禾",
+      "author_id": 1001,
+      "expected_ids": [],
+      "expected_answer": []
+    },
+    {
+      "id": "01-aggregate",
+      "kind": "aggregate",
+      "question": "小禾在本群一共发了多少条消息？",
+      "seed_query": "小禾",
+      "author_id": 1001,
+      "expected_ids": [
+        1,
+        3,
+        5
+      ],
+      "expected_answer": [
+        "3"
+      ]
+    },
+    {
+      "id": "02-exact",
+      "kind": "exact",
+      "question": "小岚最终买了哪款耳机？",
+      "seed_query": "小岚",
+      "author_id": 1002,
+      "expected_ids": [
+        13
+      ],
+      "expected_answer": [
+        "月桥 H2"
+      ]
+    },
+    {
+      "id": "02-paraphrase",
+      "kind": "paraphrase",
+      "question": "小岚最后入手的那件设备是什么型号？",
+      "seed_query": "小岚 最终",
+      "author_id": 1002,
+      "expected_ids": [
+        13
+      ],
+      "expected_answer": [
+        "月桥 H2"
+      ]
+    },
+    {
+      "id": "02-attribution",
+      "kind": "attribution",
+      "question": "谁推荐了 月桥 H2？",
+      "seed_query": "月桥 H2",
+      "author_id": 1002,
+      "expected_ids": [
+        12
+      ],
+      "expected_answer": [
+        "顾问2"
+      ]
+    },
+    {
+      "id": "02-time",
+      "kind": "time",
+      "question": "小岚在几月几日确认买了 月桥 H2？",
+      "seed_query": "月桥 H2",
+      "author_id": 1002,
+      "expected_ids": [
+        13
+      ],
+      "expected_answer": [
+        "9月2日"
+      ]
+    },
+    {
+      "id": "02-plan_reality",
+      "kind": "plan_reality",
+      "question": "小岚以前说想买 月桥 H1，后来真买它了吗？",
+      "seed_query": "月桥 H1",
+      "author_id": 1002,
+      "expected_ids": [
+        11,
+        13
+      ],
+      "expected_answer": [
+        "月桥 H2"
+      ]
+    },
+    {
+      "id": "02-multi_hop",
+      "kind": "multi_hop",
+      "question": "小岚实际买的耳机，推荐者提到的规格和理由分别是什么？",
+      "seed_query": "小岚",
+      "author_id": 1002,
+      "expected_ids": [
+        13,
+        12
+      ],
+      "expected_answer": [
+        "32 小时续航",
+        "续航更长"
+      ]
+    },
+    {
+      "id": "02-no_answer",
+      "kind": "no_answer",
+      "question": "小岚实际买的耳机的保修截止日是哪天？",
+      "seed_query": "小岚",
+      "author_id": 1002,
+      "expected_ids": [],
+      "expected_answer": []
+    },
+    {
+      "id": "02-aggregate",
+      "kind": "aggregate",
+      "question": "小岚在本群一共发了多少条消息？",
+      "seed_query": "小岚",
+      "author_id": 1002,
+      "expected_ids": [
+        11,
+        13,
+        15
+      ],
+      "expected_answer": [
+        "3"
+      ]
+    },
+    {
+      "id": "03-exact",
+      "kind": "exact",
+      "question": "小澄最终买了哪款键盘？",
+      "seed_query": "小澄",
+      "author_id": 1003,
+      "expected_ids": [
+        23
+      ],
+      "expected_answer": [
+        "竹影 K2"
+      ]
+    },
+    {
+      "id": "03-paraphrase",
+      "kind": "paraphrase",
+      "question": "小澄最后入手的那件设备是什么型号？",
+      "seed_query": "小澄 最终",
+      "author_id": 1003,
+      "expected_ids": [
+        23
+      ],
+      "expected_answer": [
+        "竹影 K2"
+      ]
+    },
+    {
+      "id": "03-attribution",
+      "kind": "attribution",
+      "question": "谁推荐了 竹影 K2？",
+      "seed_query": "竹影 K2",
+      "author_id": 1003,
+      "expected_ids": [
+        22
+      ],
+      "expected_answer": [
+        "顾问3"
+      ]
+    },
+    {
+      "id": "03-time",
+      "kind": "time",
+      "question": "小澄在几月几日确认买了 竹影 K2？",
+      "seed_query": "竹影 K2",
+      "author_id": 1003,
+      "expected_ids": [
+        23
+      ],
+      "expected_answer": [
+        "9月3日"
+      ]
+    },
+    {
+      "id": "03-plan_reality",
+      "kind": "plan_reality",
+      "question": "小澄以前说想买 竹影 K1，后来真买它了吗？",
+      "seed_query": "竹影 K1",
+      "author_id": 1003,
+      "expected_ids": [
+        21,
+        23
+      ],
+      "expected_answer": [
+        "竹影 K2"
+      ]
+    },
+    {
+      "id": "03-multi_hop",
+      "kind": "multi_hop",
+      "question": "小澄实际买的键盘，推荐者提到的规格和理由分别是什么？",
+      "seed_query": "小澄",
+      "author_id": 1003,
+      "expected_ids": [
+        23,
+        22
+      ],
+      "expected_answer": [
+        "84 键",
+        "方便携带"
+      ]
+    },
+    {
+      "id": "03-no_answer",
+      "kind": "no_answer",
+      "question": "小澄实际买的键盘的保修截止日是哪天？",
+      "seed_query": "小澄",
+      "author_id": 1003,
+      "expected_ids": [],
+      "expected_answer": []
+    },
+    {
+      "id": "03-aggregate",
+      "kind": "aggregate",
+      "question": "小澄在本群一共发了多少条消息？",
+      "seed_query": "小澄",
+      "author_id": 1003,
+      "expected_ids": [
+        21,
+        23,
+        25
+      ],
+      "expected_answer": [
+        "3"
+      ]
+    },
+    {
+      "id": "04-exact",
+      "kind": "exact",
+      "question": "小南最终买了哪款相机？",
+      "seed_query": "小南",
+      "author_id": 1004,
+      "expected_ids": [
+        33
+      ],
+      "expected_answer": [
+        "青鸟 C2"
+      ]
+    },
+    {
+      "id": "04-paraphrase",
+      "kind": "paraphrase",
+      "question": "小南最后入手的那件设备是什么型号？",
+      "seed_query": "小南 最终",
+      "author_id": 1004,
+      "expected_ids": [
+        33
+      ],
+      "expected_answer": [
+        "青鸟 C2"
+      ]
+    },
+    {
+      "id": "04-attribution",
+      "kind": "attribution",
+      "question": "谁推荐了 青鸟 C2？",
+      "seed_query": "青鸟 C2",
+      "author_id": 1004,
+      "expected_ids": [
+        32
+      ],
+      "expected_answer": [
+        "顾问4"
+      ]
+    },
+    {
+      "id": "04-time",
+      "kind": "time",
+      "question": "小南在几月几日确认买了 青鸟 C2？",
+      "seed_query": "青鸟 C2",
+      "author_id": 1004,
+      "expected_ids": [
+        33
+      ],
+      "expected_answer": [
+        "9月4日"
+      ]
+    },
+    {
+      "id": "04-plan_reality",
+      "kind": "plan_reality",
+      "question": "小南以前说想买 青鸟 C1，后来真买它了吗？",
+      "seed_query": "青鸟 C1",
+      "author_id": 1004,
+      "expected_ids": [
+        31,
+        33
+      ],
+      "expected_answer": [
+        "青鸟 C2"
+      ]
+    },
+    {
+      "id": "04-multi_hop",
+      "kind": "multi_hop",
+      "question": "小南实际买的相机，推荐者提到的规格和理由分别是什么？",
+      "seed_query": "小南",
+      "author_id": 1004,
+      "expected_ids": [
+        33,
+        32
+      ],
+      "expected_answer": [
+        "2400 万像素",
+        "镜头更便宜"
+      ]
+    },
+    {
+      "id": "04-no_answer",
+      "kind": "no_answer",
+      "question": "小南实际买的相机的保修截止日是哪天？",
+      "seed_query": "小南",
+      "author_id": 1004,
+      "expected_ids": [],
+      "expected_answer": []
+    },
+    {
+      "id": "04-aggregate",
+      "kind": "aggregate",
+      "question": "小南在本群一共发了多少条消息？",
+      "seed_query": "小南",
+      "author_id": 1004,
+      "expected_ids": [
+        31,
+        33,
+        35
+      ],
+      "expected_answer": [
+        "3"
+      ]
+    },
+    {
+      "id": "05-exact",
+      "kind": "exact",
+      "question": "小松最终买了哪款路由器？",
+      "seed_query": "小松",
+      "author_id": 1005,
+      "expected_ids": [
+        43
+      ],
+      "expected_answer": [
+        "海灯 R2"
+      ]
+    },
+    {
+      "id": "05-paraphrase",
+      "kind": "paraphrase",
+      "question": "小松最后入手的那件设备是什么型号？",
+      "seed_query": "小松 最终",
+      "author_id": 1005,
+      "expected_ids": [
+        43
+      ],
+      "expected_answer": [
+        "海灯 R2"
+      ]
+    },
+    {
+      "id": "05-attribution",
+      "kind": "attribution",
+      "question": "谁推荐了 海灯 R2？",
+      "seed_query": "海灯 R2",
+      "author_id": 1005,
+      "expected_ids": [
+        42
+      ],
+      "expected_answer": [
+        "顾问5"
+      ]
+    },
+    {
+      "id": "05-time",
+      "kind": "time",
+      "question": "小松在几月几日确认买了 海灯 R2？",
+      "seed_query": "海灯 R2",
+      "author_id": 1005,
+      "expected_ids": [
+        43
+      ],
+      "expected_answer": [
+        "9月5日"
+      ]
+    },
+    {
+      "id": "05-plan_reality",
+      "kind": "plan_reality",
+      "question": "小松以前说想买 海灯 R1，后来真买它了吗？",
+      "seed_query": "海灯 R1",
+      "author_id": 1005,
+      "expected_ids": [
+        41,
+        43
+      ],
+      "expected_answer": [
+        "海灯 R2"
+      ]
+    },
+    {
+      "id": "05-multi_hop",
+      "kind": "multi_hop",
+      "question": "小松实际买的路由器，推荐者提到的规格和理由分别是什么？",
+      "seed_query": "小松",
+      "author_id": 1005,
+      "expected_ids": [
+        43,
+        42
+      ],
+      "expected_answer": [
+        "2.5G 网口",
+        "局域网传输更快"
+      ]
+    },
+    {
+      "id": "05-no_answer",
+      "kind": "no_answer",
+      "question": "小松实际买的路由器的保修截止日是哪天？",
+      "seed_query": "小松",
+      "author_id": 1005,
+      "expected_ids": [],
+      "expected_answer": []
+    },
+    {
+      "id": "05-aggregate",
+      "kind": "aggregate",
+      "question": "小松在本群一共发了多少条消息？",
+      "seed_query": "小松",
+      "author_id": 1005,
+      "expected_ids": [
+        41,
+        43,
+        45
+      ],
+      "expected_answer": [
+        "3"
+      ]
+    },
+    {
+      "id": "06-exact",
+      "kind": "exact",
+      "question": "小沐最终买了哪款显示器？",
+      "seed_query": "小沐",
+      "author_id": 1006,
+      "expected_ids": [
+        53
+      ],
+      "expected_answer": [
+        "青苔 D2"
+      ]
+    },
+    {
+      "id": "06-paraphrase",
+      "kind": "paraphrase",
+      "question": "小沐最后入手的那件设备是什么型号？",
+      "seed_query": "小沐 最终",
+      "author_id": 1006,
+      "expected_ids": [
+        53
+      ],
+      "expected_answer": [
+        "青苔 D2"
+      ]
+    },
+    {
+      "id": "06-attribution",
+      "kind": "attribution",
+      "question": "谁推荐了 青苔 D2？",
+      "seed_query": "青苔 D2",
+      "author_id": 1006,
+      "expected_ids": [
+        52
+      ],
+      "expected_answer": [
+        "顾问6"
+      ]
+    },
+    {
+      "id": "06-time",
+      "kind": "time",
+      "question": "小沐在几月几日确认买了 青苔 D2？",
+      "seed_query": "青苔 D2",
+      "author_id": 1006,
+      "expected_ids": [
+        53
+      ],
+      "expected_answer": [
+        "9月6日"
+      ]
+    },
+    {
+      "id": "06-plan_reality",
+      "kind": "plan_reality",
+      "question": "小沐以前说想买 青苔 D1，后来真买它了吗？",
+      "seed_query": "青苔 D1",
+      "author_id": 1006,
+      "expected_ids": [
+        51,
+        53
+      ],
+      "expected_answer": [
+        "青苔 D2"
+      ]
+    },
+    {
+      "id": "06-multi_hop",
+      "kind": "multi_hop",
+      "question": "小沐实际买的显示器，推荐者提到的规格和理由分别是什么？",
+      "seed_query": "小沐",
+      "author_id": 1006,
+      "expected_ids": [
+        53,
+        52
+      ],
+      "expected_answer": [
+        "165Hz 刷新率",
+        "动态画面更流畅"
+      ]
+    },
+    {
+      "id": "06-no_answer",
+      "kind": "no_answer",
+      "question": "小沐实际买的显示器的保修截止日是哪天？",
+      "seed_query": "小沐",
+      "author_id": 1006,
+      "expected_ids": [],
+      "expected_answer": []
+    },
+    {
+      "id": "06-aggregate",
+      "kind": "aggregate",
+      "question": "小沐在本群一共发了多少条消息？",
+      "seed_query": "小沐",
+      "author_id": 1006,
+      "expected_ids": [
+        51,
+        53,
+        55
+      ],
+      "expected_answer": [
+        "3"
+      ]
+    },
+    {
+      "id": "07-exact",
+      "kind": "exact",
+      "question": "小遥最终买了哪款硬盘？",
+      "seed_query": "小遥",
+      "author_id": 1007,
+      "expected_ids": [
+        63
+      ],
+      "expected_answer": [
+        "白帆 S2"
+      ]
+    },
+    {
+      "id": "07-paraphrase",
+      "kind": "paraphrase",
+      "question": "小遥最后入手的那件设备是什么型号？",
+      "seed_query": "小遥 最终",
+      "author_id": 1007,
+      "expected_ids": [
+        63
+      ],
+      "expected_answer": [
+        "白帆 S2"
+      ]
+    },
+    {
+      "id": "07-attribution",
+      "kind": "attribution",
+      "question": "谁推荐了 白帆 S2？",
+      "seed_query": "白帆 S2",
+      "author_id": 1007,
+      "expected_ids": [
+        62
+      ],
+      "expected_answer": [
+        "顾问7"
+      ]
+    },
+    {
+      "id": "07-time",
+      "kind": "time",
+      "question": "小遥在几月几日确认买了 白帆 S2？",
+      "seed_query": "白帆 S2",
+      "author_id": 1007,
+      "expected_ids": [
+        63
+      ],
+      "expected_answer": [
+        "9月7日"
+      ]
+    },
+    {
+      "id": "07-plan_reality",
+      "kind": "plan_reality",
+      "question": "小遥以前说想买 白帆 S1，后来真买它了吗？",
+      "seed_query": "白帆 S1",
+      "author_id": 1007,
+      "expected_ids": [
+        61,
+        63
+      ],
+      "expected_answer": [
+        "白帆 S2"
+      ]
+    },
+    {
+      "id": "07-multi_hop",
+      "kind": "multi_hop",
+      "question": "小遥实际买的硬盘，推荐者提到的规格和理由分别是什么？",
+      "seed_query": "小遥",
+      "author_id": 1007,
+      "expected_ids": [
+        63,
+        62
+      ],
+      "expected_answer": [
+        "2TB 容量",
+        "空间足够"
+      ]
+    },
+    {
+      "id": "07-no_answer",
+      "kind": "no_answer",
+      "question": "小遥实际买的硬盘的保修截止日是哪天？",
+      "seed_query": "小遥",
+      "author_id": 1007,
+      "expected_ids": [],
+      "expected_answer": []
+    },
+    {
+      "id": "07-aggregate",
+      "kind": "aggregate",
+      "question": "小遥在本群一共发了多少条消息？",
+      "seed_query": "小遥",
+      "author_id": 1007,
+      "expected_ids": [
+        61,
+        63,
+        65
+      ],
+      "expected_answer": [
+        "3"
+      ]
+    },
+    {
+      "id": "08-exact",
+      "kind": "exact",
+      "question": "小川最终买了哪款麦克风？",
+      "seed_query": "小川",
+      "author_id": 1008,
+      "expected_ids": [
+        73
+      ],
+      "expected_answer": [
+        "回声 M2"
+      ]
+    },
+    {
+      "id": "08-paraphrase",
+      "kind": "paraphrase",
+      "question": "小川最后入手的那件设备是什么型号？",
+      "seed_query": "小川 最终",
+      "author_id": 1008,
+      "expected_ids": [
+        73
+      ],
+      "expected_answer": [
+        "回声 M2"
+      ]
+    },
+    {
+      "id": "08-attribution",
+      "kind": "attribution",
+      "question": "谁推荐了 回声 M2？",
+      "seed_query": "回声 M2",
+      "author_id": 1008,
+      "expected_ids": [
+        72
+      ],
+      "expected_answer": [
+        "顾问8"
+      ]
+    },
+    {
+      "id": "08-time",
+      "kind": "time",
+      "question": "小川在几月几日确认买了 回声 M2？",
+      "seed_query": "回声 M2",
+      "author_id": 1008,
+      "expected_ids": [
+        73
+      ],
+      "expected_answer": [
+        "9月8日"
+      ]
+    },
+    {
+      "id": "08-plan_reality",
+      "kind": "plan_reality",
+      "question": "小川以前说想买 回声 M1，后来真买它了吗？",
+      "seed_query": "回声 M1",
+      "author_id": 1008,
+      "expected_ids": [
+        71,
+        73
+      ],
+      "expected_answer": [
+        "回声 M2"
+      ]
+    },
+    {
+      "id": "08-multi_hop",
+      "kind": "multi_hop",
+      "question": "小川实际买的麦克风，推荐者提到的规格和理由分别是什么？",
+      "seed_query": "小川",
+      "author_id": 1008,
+      "expected_ids": [
+        73,
+        72
+      ],
+      "expected_answer": [
+        "48kHz 采样率",
+        "收音更清晰"
+      ]
+    },
+    {
+      "id": "08-no_answer",
+      "kind": "no_answer",
+      "question": "小川实际买的麦克风的保修截止日是哪天？",
+      "seed_query": "小川",
+      "author_id": 1008,
+      "expected_ids": [],
+      "expected_answer": []
+    },
+    {
+      "id": "08-aggregate",
+      "kind": "aggregate",
+      "question": "小川在本群一共发了多少条消息？",
+      "seed_query": "小川",
+      "author_id": 1008,
+      "expected_ids": [
+        71,
+        73,
+        75
+      ],
+      "expected_answer": [
+        "3"
+      ]
+    },
+    {
+      "id": "09-exact",
+      "kind": "exact",
+      "question": "小葵最终买了哪款充电器？",
+      "seed_query": "小葵",
+      "author_id": 1009,
+      "expected_ids": [
+        83
+      ],
+      "expected_answer": [
+        "晚星 P2"
+      ]
+    },
+    {
+      "id": "09-paraphrase",
+      "kind": "paraphrase",
+      "question": "小葵最后入手的那件设备是什么型号？",
+      "seed_query": "小葵 最终",
+      "author_id": 1009,
+      "expected_ids": [
+        83
+      ],
+      "expected_answer": [
+        "晚星 P2"
+      ]
+    },
+    {
+      "id": "09-attribution",
+      "kind": "attribution",
+      "question": "谁推荐了 晚星 P2？",
+      "seed_query": "晚星 P2",
+      "author_id": 1009,
+      "expected_ids": [
+        82
+      ],
+      "expected_answer": [
+        "顾问9"
+      ]
+    },
+    {
+      "id": "09-time",
+      "kind": "time",
+      "question": "小葵在几月几日确认买了 晚星 P2？",
+      "seed_query": "晚星 P2",
+      "author_id": 1009,
+      "expected_ids": [
+        83
+      ],
+      "expected_answer": [
+        "9月9日"
+      ]
+    },
+    {
+      "id": "09-plan_reality",
+      "kind": "plan_reality",
+      "question": "小葵以前说想买 晚星 P1，后来真买它了吗？",
+      "seed_query": "晚星 P1",
+      "author_id": 1009,
+      "expected_ids": [
+        81,
+        83
+      ],
+      "expected_answer": [
+        "晚星 P2"
+      ]
+    },
+    {
+      "id": "09-multi_hop",
+      "kind": "multi_hop",
+      "question": "小葵实际买的充电器，推荐者提到的规格和理由分别是什么？",
+      "seed_query": "小葵",
+      "author_id": 1009,
+      "expected_ids": [
+        83,
+        82
+      ],
+      "expected_answer": [
+        "100W 功率",
+        "能给笔记本供电"
+      ]
+    },
+    {
+      "id": "09-no_answer",
+      "kind": "no_answer",
+      "question": "小葵实际买的充电器的保修截止日是哪天？",
+      "seed_query": "小葵",
+      "author_id": 1009,
+      "expected_ids": [],
+      "expected_answer": []
+    },
+    {
+      "id": "09-aggregate",
+      "kind": "aggregate",
+      "question": "小葵在本群一共发了多少条消息？",
+      "seed_query": "小葵",
+      "author_id": 1009,
+      "expected_ids": [
+        81,
+        83,
+        85
+      ],
+      "expected_answer": [
+        "3"
+      ]
+    },
+    {
+      "id": "10-exact",
+      "kind": "exact",
+      "question": "小溪最终买了哪款投影仪？",
+      "seed_query": "小溪",
+      "author_id": 1010,
+      "expected_ids": [
+        93
+      ],
+      "expected_answer": [
+        "云舟 V2"
+      ]
+    },
+    {
+      "id": "10-paraphrase",
+      "kind": "paraphrase",
+      "question": "小溪最后入手的那件设备是什么型号？",
+      "seed_query": "小溪 最终",
+      "author_id": 1010,
+      "expected_ids": [
+        93
+      ],
+      "expected_answer": [
+        "云舟 V2"
+      ]
+    },
+    {
+      "id": "10-attribution",
+      "kind": "attribution",
+      "question": "谁推荐了 云舟 V2？",
+      "seed_query": "云舟 V2",
+      "author_id": 1010,
+      "expected_ids": [
+        92
+      ],
+      "expected_answer": [
+        "顾问10"
+      ]
+    },
+    {
+      "id": "10-time",
+      "kind": "time",
+      "question": "小溪在几月几日确认买了 云舟 V2？",
+      "seed_query": "云舟 V2",
+      "author_id": 1010,
+      "expected_ids": [
+        93
+      ],
+      "expected_answer": [
+        "9月10日"
+      ]
+    },
+    {
+      "id": "10-plan_reality",
+      "kind": "plan_reality",
+      "question": "小溪以前说想买 云舟 V1，后来真买它了吗？",
+      "seed_query": "云舟 V1",
+      "author_id": 1010,
+      "expected_ids": [
+        91,
+        93
+      ],
+      "expected_answer": [
+        "云舟 V2"
+      ]
+    },
+    {
+      "id": "10-multi_hop",
+      "kind": "multi_hop",
+      "question": "小溪实际买的投影仪，推荐者提到的规格和理由分别是什么？",
+      "seed_query": "小溪",
+      "author_id": 1010,
+      "expected_ids": [
+        93,
+        92
+      ],
+      "expected_answer": [
+        "1080p 分辨率",
+        "卧室距离合适"
+      ]
+    },
+    {
+      "id": "10-no_answer",
+      "kind": "no_answer",
+      "question": "小溪实际买的投影仪的保修截止日是哪天？",
+      "seed_query": "小溪",
+      "author_id": 1010,
+      "expected_ids": [],
+      "expected_answer": []
+    },
+    {
+      "id": "10-aggregate",
+      "kind": "aggregate",
+      "question": "小溪在本群一共发了多少条消息？",
+      "seed_query": "小溪",
+      "author_id": 1010,
+      "expected_ids": [
+        91,
+        93,
+        95
+      ],
+      "expected_answer": [
+        "3"
+      ]
+    }
+  ]
+}

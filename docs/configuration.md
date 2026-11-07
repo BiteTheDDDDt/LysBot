@@ -1,0 +1,42 @@
+# 配置与运行
+
+在 `.env` 配置 `MASTER_QQ`、OneBot 的 `ACCESS_TOKEN`、`MODEL_GENERAL` 与 provider 凭据。master 在启动前映射为唯一的 NoneBot superuser，旧的 `SUPERUSERS` 不会扩大管理员范围。
+
+## 模型
+
+模型配置写作 `provider:model_id`，备用链使用 ` | ` 分隔。当前适配器包括 `openai`、`deepseek`、`dashscope`、`google`、`anthropic`、`nvidia`、`openrouter`、`siliconflow`、`tencentmaas`、`volc`、`xiaomimimo` 和 `cliproxyapi`。具体模型可用性取决于账号与上游服务；不需要安装 CLIProxyAPI 才能运行。
+
+- `MODEL_GENERAL` 必填，负责基础聊天、规划、摘要、记忆提取及普通文本任务。
+- `MODEL_CHAT`、`MODEL_PLANNER`、`MODEL_SUMMARY`、`MODEL_IMPORTANT_INFO` 为可选覆盖，未填继承 general。
+- `MODEL_FALLBACK` 可不填；填写后追加到普通文本任务的候选链。
+- `MODEL_SEARCH`、`MODEL_VISION`、`MODEL_TTS`、`MODEL_IMAGE_GEN` 未填即无对应能力；专用模型只使用各自的候选链。
+- 搜索实现支持 DashScope 原生搜索及已适配的 GPT Responses 原生搜索；当前不是任意模型都能开启联网。
+- 识图仍有协议能力白名单，见 `providers.py`；语音当前使用 Google 原生 TTS，生图使用 OpenAI/CLIProxyAPI Images API。
+
+显式配置了错误 provider、协议不支持的型号或无可用凭据时，启动会报告配置错误。未配置的能力从工具目录移除，后台入口和执行入口也不发起对应模型调用。
+
+## 人设和群聊行为
+
+`PERSONA_FILE` 默认是 `personas/phosphophyllite.toml`，文件包含角色名称、性格与口吻、外貌和声音。通用执行规则由程序维护。更换人设后重启 bot。
+
+主动接话、复读、表情、冷群梗图、jrrp 和戳一戳保留为内置互动行为。静音命令和掉线邮件已从新版移除。
+
+`ENABLE_DAILY_BRIEFING`、`ENABLE_DAILY_NEWS_BROADCAST`、`ENABLE_MODEL_CARD` 默认为 false。新闻要求前两项同时开启并配置搜索模型；群像仅在生图可用时生成。配置冲突会在启动时说明。
+
+## 本地检索
+
+模型固定为 BGE small 中文 ONNX 工件，512 维，固定 revision、SHA-256 和分段策略。不需要 embedding API key，不支持通过环境变量更换模型身份。`scripts/prepare_local_embedding.py` 准备文件；运行时只读本地权重。
+
+向量、FTS5、原文、摘要和来源关系均保存在 SQLite 中。缺少权重或索引未就绪时保留关键词查询。模型身份或策略在将来版本变化时需要重建索引，不能把同维度视作兼容。
+
+默认数据目录是 `data/`。Compose 把它挂载到 `/app/data`，权重在 `data/models/`；可以通过 `LLM_CHAT_DATABASE_PATH` 继续使用旧部署的独立数据库卷。查询状态：
+
+```bash
+docker compose exec bot python scripts/agentic_search_ops.py status --database /app/data/history.db
+```
+
+实际数据库在其他位置时替换参数。在运行库所在的系统内执行查询与 SQLite backup，避免跨 Windows/Linux 同时打开一个 WAL 数据库。
+
+## 命令
+
+master 可使用 `/status`、`/model`、`/usage`、`/summary`、`/clear`。完整清空仍需明确确认。群友可使用 `/jrrp`、`/memory`，也可以在对话中要求查看和纠正自己的记忆。纠错保留预览、确认、撤销和冲突检查。
