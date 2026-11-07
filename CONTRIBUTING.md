@@ -27,4 +27,18 @@ python scripts/smoke_test.py
 
 `python scripts/check_release.py` 检查已跟踪文件和历史中的已知敏感路径及常见密钥格式。它不扫描全部历史内容，也不能代替聊天资料与素材来源的人工审查。
 
-本轮执行过的验证及其边界见 [验证记录](docs/validation.md)。AI 操作规范见根目录 `AGENTS.md`。
+自动测试结果见仓库的 [GitHub Actions](https://github.com/BiteTheDDDDt/LysBot/actions)。AI 操作规范见根目录 `AGENTS.md`。
+
+## 开发与评估脚本
+
+| 脚本 | 使用场景 |
+| --- | --- |
+| `scripts/run_tests.py` | 日常回归与 CI，隔离配置、数据和 HTTP 请求；`-p` 选择测试文件 |
+| `scripts/smoke_test.py` | 在临时目录启动 bot，以模拟模型和 OneBot 验证完整消息闭环 |
+| `scripts/evaluate_agentic_search.py` | 调整历史检索时，使用 `tests/fixtures/agentic_search_eval.json` 的合成资料比较检索或 agent 效果；不是部署步骤 |
+| `scripts/evaluate_local_embedding.py` | 下载权重后验证真实本地 BGE 的语义召回、来源、隔离和延迟，禁止网络请求；不是每次单测的依赖 |
+| `scripts/check_release.py` | 发布前检查已跟踪文件中的常见密钥及私有路径 |
+
+评估脚本先用 `--help` 查看参数。检索评估的 `prepare`、`retrieve` 使用独立的 `agentic-eval` 数据库；`agent` 会调用配置的真实模型并消耗额度，不能当作离线单测。BGE 评估使用单独的 `agentic-local-eval*` 目录与已有权重。所有结果留在被忽略的 `data/` 下，不提交一次运行的报告。
+
+部署与维护脚本的用途及数据影响见 [AI 操作说明](docs/ai-operations.md)。新增脚本应有明确使用场景、可用入口和必要验证；临时排查、一次性迁移及制作素材的过程文件留在本地，不作为公共项目接口提交。

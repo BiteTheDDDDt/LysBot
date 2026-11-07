@@ -125,7 +125,7 @@ LysBot/
 └── .env.example                # 配置模板
 ```
 
-开发与测试见 [贡献指南](CONTRIBUTING.md)，AI 开发约定见 [AGENTS.md](AGENTS.md)，旧部署的数据与配置迁移见 [迁移说明](docs/migration.md)，已有验证及其范围见 [验证记录](docs/validation.md)。
+开发与测试见 [贡献指南](CONTRIBUTING.md)，AI 开发约定见 [AGENTS.md](AGENTS.md)，旧部署的数据与配置迁移见 [迁移说明](docs/migration.md)。
 
 聊天内容会写入本地数据库，并按实际配置发送给模型服务，部署者应向群友说明记录和调用方式。
 

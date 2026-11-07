@@ -31,6 +31,29 @@ docker compose run --rm --no-deps bot python scripts/napcat.py connect
 
 ## 维护与开发
 
+仓库保留以下运维入口。参数以各脚本的 `--help` 为准；在 Docker 内对数据操作时使用容器内路径。
+
+| 脚本 | 用途与数据影响 |
+| --- | --- |
+| `doctor.py` | 只读配置、工件与可选运行状态，不调用模型 |
+| `napcat.py` | 查询登录、保存私有二维码、配置本项目的反向 WebSocket |
+| `healthcheck.py` | Compose 自动调用，检查进程心跳、数据库和 OneBot 状态；不需要人定期执行 |
+| `prepare_local_embedding.py` | setup 服务调用，下载并校验固定 BGE 权重；已有有效文件时复用 |
+| `database_maintenance.py` | SQLite 完整性检查、一致性备份、在新副本上重建普通索引；不替换运行数据库 |
+| `agentic_search_ops.py` | 查询全文/向量索引进度；索引补建、失败任务重试和副本索引导入会写数据，按需执行 |
+| `review_meme_library.py` | 历史图库重审；review 调用视觉模型并写报告，apply 修改随机发送资格，restore 按记录恢复。日常采集由 bot 自动处理，无需部署时重审 |
+| `run_news_broadcast.py` | 新闻预览，不向 QQ 发消息、不消费简报；会调用真实模型并保存预览图片，调试新闻链路时使用 |
+
+例如备份数据库：
+
+```bash
+docker compose exec bot python scripts/database_maintenance.py snapshot /app/data/history.db /app/data/backups/history-before-upgrade.db
+```
+
+目标文件必须不存在。在实际运行库所在的系统内执行，不从另一个 Windows/Linux 环境跨系统打开正在使用 WAL 的数据库。普通 SQLite `REINDEX` 不等于重新生成向量；向量状态与维护使用 `agentic_search_ops.py`。
+
+开发测试和可复现评估入口见 [贡献指南](../CONTRIBUTING.md#开发与评估脚本)。
+
 - 状态和用量优先由 master 在 QQ 使用 `/status`、`/usage` 查询。
 - AI 排错先读结构化诊断，再取必要且脱敏的日志；不把完整环境或群聊数据库放入答复。
 - 更新代码由 AI 构建并替换对应 bot 服务；生产数据、`.env` 和私人插件留在部署侧。
