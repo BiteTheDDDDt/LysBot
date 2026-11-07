@@ -38,29 +38,32 @@ LysBot 是一个有长期记忆、能查资料、会接梗的 QQ 群友，默认
 
 请从 [AGENTS.md](AGENTS.md) 开始，按其中的部署指引完成配置与验证。
 
-## 3. 可选功能与手工配置
+## 3. 想调整什么，直接告诉 AI
 
-配置保存在 `.env`，可以自己改，也可以告诉 AI 你想启用什么。模板见 [.env.example](.env.example)，多 provider、多模型组合见 [.env.models.example](.env.models.example)。
+部署后，继续在同一个 AI 助手里描述需求即可。下面的提示词可以直接复制，方括号里的内容换成你的想法。
 
-| 配置 | 用途 |
-| --- | --- |
-| `MASTER_QQ`、`ACCESS_TOKEN` | 管理账号与 NapCat 连接凭据 |
-| `MODEL_GENERAL`、provider 凭据 | 基础聊天及未单独配置的文本任务 |
-| `MODEL_PLANNER`、`MODEL_CHAT` | 分别选行为逻辑可靠、语言风格好的强模型；未填继承 general |
-| `MODEL_VISION`、`MODEL_SEARCH` | 识图与原生联网搜索，未填则关闭 |
-| `MODEL_TTS`、`MODEL_IMAGE_GEN` | 语音与生图，未填则关闭；TTS 单独配置 Google |
-| `ENABLE_DAILY_BRIEFING`、`ENABLE_DAILY_NEWS_BROADCAST` | 简报、新闻开关；新闻依赖简报和搜索模型 |
-| `ENABLE_MODEL_CARD` | 在群名片显示回复所用模型 |
-| `PERSONA_FILE` | 更换默认人设 |
+**配置功能**
 
-每个 `MODEL_*` 都可用 ` | ` 按顺序配置多个候选，调用失败时自动往后尝试；普通文本任务还会追加 `MODEL_FALLBACK`。例如：
-
-```dotenv
-MODEL_SUMMARY="cliproxyapi:gpt-6-luna | google:gemini-3.5-flash-lite"
-MODEL_FALLBACK="google:gemini-3.5-flash-lite | openrouter:nvidia/nemotron-3-ultra-550b-a55b:free"
+```text
+我想给 LysBot 开启 [识图 / 联网搜索 / 语音回复 / 生图 / 每日群聊简报 / 每日新闻]。
+请按仓库文档检查依赖，完成配置并验证功能，需要我提供哪些账号或凭据就告诉我。
 ```
 
-完整说明：[配置与 fallback](docs/configuration.md) · [Provider 与费用](docs/providers.md) · [QQ 使用手册](docs/commands.md) · [插件扩展](docs/extensions.md)。
+**找免费模型**
+
+```text
+LysBot 有哪些可以白嫖的 provider？请结合仓库推荐和当前免费额度，
+帮我选一套模型配置，说明限额和稳定性，并配好按顺序自动 fallback 的备用模型。
+```
+
+**个性化人设**
+
+```text
+我想给 LysBot 设置个性化人设：[角色、性格、说话风格、称呼习惯]。
+请帮我配置并启用这个人设。
+```
+
+想手动修改也可以看 [.env.example](.env.example) 和 [多模型组合示例](.env.models.example)。详细说明：[配置手册](docs/configuration.md) · [Provider 与费用](docs/providers.md) · [QQ 使用手册](docs/commands.md) · [插件扩展](docs/extensions.md)。
 
 ## 4. 原理、架构与目录
 
