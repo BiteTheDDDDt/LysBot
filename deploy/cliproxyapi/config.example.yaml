@@ -1,0 +1,24 @@
+# CLIProxyAPI v8 配置；复制到 data/cliproxyapi/config.yaml 后替换本地访问密钥。
+# auth 目录与配置均为私有数据，不提交 Git。上游模板见 docs/cliproxyapi.md。
+config-version: 8
+server:
+  host: "0.0.0.0"
+  port: 8317
+access:
+  api-keys:
+    - "replace-with-a-long-random-local-key"
+oauth:
+  auth-dir: "/root/.cli-proxy-api"
+management:
+  allow-remote: false
+  secret-key: ""
+  disable-control-panel: true
+multimedia:
+  disable-image-generation: "chat"
+observability:
+  logs:
+    debug: false
+    logging-to-file: false
+    request-log: false
+  usage:
+    usage-statistics-enabled: false

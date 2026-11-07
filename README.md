@@ -30,7 +30,7 @@ LysBot 是一个有长期记忆、能查资料、会接梗的 QQ 群友，默认
 
 - 一个用作 bot 的 **QQ 账号**，首次登录时用手机 QQ 扫码确认。
 - **你自己的 QQ 号**，作为 master 管理账号。
-- 一个支持工具调用的**模型服务**：模型 ID、API key，以及需要时的 API 地址。密钥可以直接填入本地 `.env`。
+- 一个可用的 **Codex 账号**（推荐让 AI 部署 CLIProxyAPI 网关），或支持工具调用的**模型 API**。需要语音时另准备 Google API key；密钥直接填入本地 `.env`。
 - 一台 **AI 可以操作的电脑或服务器**，用来运行 bot。
 
 剩下的安装、配置、启动和排错交给 AI。基础聊天只需一个通用模型，默认磷叶石人设已经配好，无需额外准备 GPU、向量数据库或 embedding 服务。
@@ -38,6 +38,8 @@ LysBot 是一个有长期记忆、能查资料、会接梗的 QQ 群友，默认
 ### 如果你是 AI
 
 请先阅读 [AGENTS.md](AGENTS.md)，再按照 [QUICKSTART.md](QUICKSTART.md) 完成环境检查、安装、配置、启动和验证。诊断、扫码接入和维护接口见 [AI 操作说明](docs/ai-operations.md)，配置含义见 [配置与运行说明](docs/configuration.md)。
+
+用户已有可用 Codex 账号时，优先按 [CLIProxyAPI 指南](docs/cliproxyapi.md) 配置网关，承接聊天、识图、搜索和生图；Google TTS 单独配置。按账号权限逐项验证后启用，不要求用户购买订阅。其他服务及免费/付费方式见 [provider 指南](docs/providers.md)。
 
 由你完成依赖安装、本地向量模型准备和 NapCat 连接配置；缺少必要信息时向用户询问，需要登录时展示私有二维码，让用户用手机 QQ 扫码。保留已有配置与数据，不回显密钥，不把 WebUI 表单配置交给用户。最后确认 bot 能在 QQ 中实际收到消息并回复，再报告部署结果。
 
@@ -51,7 +53,7 @@ LysBot 是一个有长期记忆、能查资料、会接梗的 QQ 群友，默认
 | --- | --- |
 | `MASTER_QQ` | 你的管理账号，拥有模型切换、状态查询和数据清理等权限；不是 bot 小号 |
 | `MODEL_GENERAL` | 通用模型，格式为 `provider:model_id`，负责聊天、规划、摘要和记忆提取等文本任务 |
-| Provider 凭据 | 对应服务的 API key；使用 OpenAI 兼容服务时还可设置 `OPENAI_BASE_URL` |
+| Provider 凭据 | 对应服务的 API key 与可选的 `*_BASE_URL`；CLIProxyAPI 使用本地网关访问密钥 |
 | `ACCESS_TOKEN` | bot 与 NapCat 之间的连接凭据，可以让 AI 生成并配置到两端 |
 
 通用模型需要支持工具调用。模型可用性取决于服务商和账号权限；密钥留在本地 `.env`，不要提交到仓库。
@@ -85,26 +87,13 @@ LysBot 是一个有长期记忆、能查资料、会接梗的 QQ 群友，默认
 - **本地检索**：固定使用本地 BGE 中文向量模型，由安装流程准备，日常 CPU 离线推理，不需要选型号或填维度。工件未就绪时，仍保留关键词和 SQL 查询。
 - **添加插件**：把可信的本地 NoneBot 插件放进 `extensions/`，可增加模型工具、事件处理、定时任务和通知。私人插件默认被 Git 忽略，接口见 [扩展指南](docs/extensions.md)。
 
-更多 provider、模型限制、数据路径和 QQ 命令见 [配置与运行说明](docs/configuration.md)。修改配置后的重启、验证和维护可以继续交给 AI。
+全部 12 个 provider、模型系列、能力限制和免费/付费方式见 [provider 指南](docs/providers.md)；数据路径和 QQ 命令见 [配置与运行说明](docs/configuration.md)。修改配置后的重启、验证和维护可以继续交给 AI。
 
 ## 4. 原理、架构与目录
 
 LysBot 基于 **NoneBot2 + NapCat / OneBot v11** 接收和发送 QQ 消息。参与规划决定是否接话、回应谁或等待补充；执行规划按需检索和调用工具；聊天模型负责最后的自然表达。程序负责权限、会话隔离、超时、并发以及真实发送回执。
 
-```mermaid
-flowchart LR
-    QQ["QQ"] <--> NapCat["NapCat · OneBot v11"]
-    NapCat <--> Entry["消息接入与聚合"]
-    Entry --> Participation["参与规划"]
-    Participation --> Execution["执行规划与工具调用"]
-    Execution --> Chat["聊天成文"]
-    Chat --> Delivery["发送与回执"]
-    Delivery --> NapCat
-    Entry --> Memory["SQLite 历史与记忆"]
-    Execution <--> Memory
-    Memory --- Index["FTS5 + 本地 BGE / sqlite-vec"]
-    Execution <--> Tools["可选能力与插件"]
-```
+![LysBot 架构：QQ 经 NapCat 接入，依次进行参与规划、工具执行、聊天成文与发送回执；历史记忆和可选能力为执行提供支持。](assets/architecture.svg)
 
 群聊原文、摘要和重要信息保存在 SQLite 中，后台构建全文与向量索引。模型可以先召回线索，再用只读 SQL 做精确过滤或统计，最后回读原消息核对来源。摘要和提取记忆是线索，原始发言用于核验；记忆纠错保留确认、撤销和冲突检查。
 
@@ -131,6 +120,7 @@ LysBot/
 ├── docs/                       # 配置、扩展、迁移和运维文档
 ├── assets/                     # 项目头图与素材说明
 ├── compose.yaml                # Bot、NapCat 与模型准备服务
+├── compose.cliproxyapi.yaml    # 可选 Codex 模型网关
 ├── Dockerfile                  # 运行镜像与依赖缓存
 └── .env.example                # 配置模板
 ```

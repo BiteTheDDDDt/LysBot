@@ -1,0 +1,15 @@
+# 可选覆盖文件，始终和 compose.yaml 一起使用。先按 docs/cliproxyapi.md 准备私有配置。
+services:
+  cliproxyapi:
+    image: eceasy/cli-proxy-api:v8.0.59
+    restart: unless-stopped
+    ports:
+      - 127.0.0.1:8317:8317
+    volumes:
+      - type: bind
+        source: ./data/cliproxyapi/config.yaml
+        target: /CLIProxyAPI/config.yaml
+        read_only: true
+        bind:
+          create_host_path: false
+      - ./data/cliproxyapi/auth:/root/.cli-proxy-api

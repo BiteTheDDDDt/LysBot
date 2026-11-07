@@ -7,6 +7,7 @@ LysBot 对 AI 友好：部署、运维和开发由 AI 通过仓库文档与稳�
 ## 快速定位
 
 - 首次部署：`QUICKSTART.md`。
+- 模型选型与费用：`docs/providers.md`；已有可用 Codex 账号时优先评估 `docs/cliproxyapi.md`，复用账号授权网关承担大部分能力，Google TTS 独立配置。专用接口逐项验证，不擅自开通付费服务。
 - 模型、人设、命令：`docs/configuration.md`。
 - 扩展 API：`lysbot/`，说明在 `docs/extensions.md`。
 - 生产数据迁移：`docs/migration.md`。

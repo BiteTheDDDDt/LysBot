@@ -6,6 +6,8 @@
 
 下面的命令供 AI 执行；人只需提供或填写 `.env`，并在手机 QQ 中完成首次登录确认。
 
+**给部署 AI：优先评估 CLIProxyAPI + Codex 方案。** 已有可用 Codex 账号时，按 [网关部署指南](docs/cliproxyapi.md) 配好本地代理，让它承接聊天、识图、原生搜索及账号支持的生图，TTS 单独接 Google。首次 OAuth 由账号所有者登录确认，其余配置和验证由 AI 完成。用户已有 API 或没有适用账号时直接走普通 API，不要求购买订阅。全部 provider、免费层和付费方式见 [provider 指南](docs/providers.md)。
+
 ## 1. 准备环境与配置
 
 首次部署先克隆仓库并进入目录；已经在正确的 checkout 中则跳过，不重复克隆或覆盖。
@@ -26,7 +28,7 @@ cd LysBot
 | `MASTER_QQ` | 你的管理账号，不是 bot 小号 |
 | `ACCESS_TOKEN` | 一段自己生成的长随机字符串，稍后填到 NapCat |
 | `MODEL_GENERAL` | `provider:model_id`，例如自己的 `openai:模型ID` |
-| Provider 凭据 | 对应的 API key；OpenAI 兼容服务还可设置 `OPENAI_BASE_URL` |
+| Provider 凭据 | 对应的 API key；CLIProxyAPI 使用本地网关访问密钥与 `CLIPROXYAPI_BASE_URL`，直连服务使用各自的 key / URL |
 
 不用填写搜索、视觉、语音、生图或向量模型配置。通用模型需支持工具调用。不要把 `.env`、数据库、登录状态或二维码提交到 Git、粘贴到 issue 或排错报告中。
 

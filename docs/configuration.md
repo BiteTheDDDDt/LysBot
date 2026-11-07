@@ -6,6 +6,8 @@
 
 模型配置写作 `provider:model_id`，备用链使用 ` | ` 分隔。当前适配器包括 `openai`、`deepseek`、`dashscope`、`google`、`anthropic`、`nvidia`、`openrouter`、`siliconflow`、`tencentmaas`、`volc`、`xiaomimimo` 和 `cliproxyapi`。具体模型可用性取决于账号与上游服务；不需要安装 CLIProxyAPI 才能运行。
 
+模型系列、免费/试用/订阅/按量计费的区别及专用能力白名单见 [provider 指南](providers.md)。已有可用 Codex 账号时，优先考虑 [CLIProxyAPI 部署方案](cliproxyapi.md)，Google TTS 单独接入。全部 provider 的凭据名和默认地址见 [.env.example](../.env.example)。
+
 - `MODEL_GENERAL` 必填，负责基础聊天、规划、摘要、记忆提取及普通文本任务。
 - `MODEL_CHAT`、`MODEL_PLANNER`、`MODEL_SUMMARY`、`MODEL_IMPORTANT_INFO` 为可选覆盖，未填继承 general。
 - `MODEL_FALLBACK` 可不填；填写后追加到普通文本任务的候选链。
