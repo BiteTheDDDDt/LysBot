@@ -10,6 +10,8 @@ python scripts/smoke_test.py
 
 测试入口使用虚构凭据和临时数据库，禁用 HTTPX 传输，不需要 `.env`、QQ 或真实模型服务。smoke test 在临时源码副本中启动真实 bot，以本地模型桩和模拟 OneBot 验证消息闭环；它不使用 QQ 账号或外部模型。按文件运行单元测试可追加 `-p test_lysbot_config.py`。
 
+本地 Python 环境用于开发调试和离线测试。准备部署时使用与普通用户相同的 Dockerfile 和 Compose 流程，见 [构建与更新](docs/ai-operations.md#构建与更新)；项目自身的生产环境也使用该流程，私人功能通过插件接入。
+
 | 位置 | 用途 |
 | --- | --- |
 | `bot.py`、`src/bootstrap.py` | 启动和 master 身份映射 |

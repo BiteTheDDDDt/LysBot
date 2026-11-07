@@ -2,6 +2,26 @@
 
 LysBot 的人机边界：人在 QQ 里聊天和管理，最多编辑 `.env`；安装、运维和开发交给 AI。仓库根目录的 `AGENTS.md` 是代码助手入口，`QUICKSTART.md` 是部署入口，不提供要求人维护的独立控制台。
 
+## 构建与更新
+
+公开部署和项目自身的生产环境统一使用仓库内的 Dockerfile、Compose 文件与以下更新流程。首次安装见 [QUICKSTART](../QUICKSTART.md)。私有配置、人设、插件、现有数据卷和网络通过 `.env`、挂载或 Compose override 接入。
+
+1. 选择要部署的源码提交，完成相关测试；保留当前运行镜像的独立回退标签、现有配置及必要的数据备份，不覆盖未提交的修改。
+2. 在该源码版本构建 bot 镜像，构建完成后先检查配置，再替换运行实例：
+
+```bash
+docker compose build bot
+docker compose run --rm --no-deps bot python scripts/doctor.py --json
+docker compose up -d --no-deps bot
+docker compose exec bot python scripts/healthcheck.py
+```
+
+3. 检查 QQ 实际回复及本次修改涉及的功能，报告源码版本与验证结果。doctor 不调用真实模型，不能代替功能验证。
+
+使用私有 override 的部署，每条命令都沿用同一组 Compose 文件和项目名，避免意外创建第二个实例。只更新 bot 时保留现有 NapCat、CLIProxyAPI 与数据；不顺带升级这些服务。配置检查失败时先修复，已有运行实例继续使用原镜像。
+
+只改 `.env` 时执行 `docker compose up -d --no-deps --force-recreate bot`，不需要重新构建。只改挂载的人设或 Python 插件时重启 bot；依赖变化需要重新构建。首次构建需要下载依赖；后续仅修改源码会复用 Docker 依赖缓存，数据库、图库和向量权重通过挂载保留。
+
 ## 结构化诊断
 
 ```bash

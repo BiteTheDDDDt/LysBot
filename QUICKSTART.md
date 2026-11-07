@@ -17,7 +17,7 @@ git clone https://github.com/BiteTheDDDDt/LysBot.git
 cd LysBot
 ```
 
-推荐 Docker Compose（Windows 可使用 Docker Desktop 的 Linux 容器）。在 LysBot 根目录执行 `docker version` 和 `docker compose version`，确认引擎可用。
+默认部署方式是 Docker Compose：由 AI 使用本仓库 Dockerfile 在部署机器构建镜像并运行，项目自身的生产环境也使用同一流程。Windows 可使用 Docker Desktop 的 Linux 容器。在 LysBot 根目录执行 `docker version` 和 `docker compose version`，确认引擎可用。
 
 没有 `.env` 时复制 `.env.example`：PowerShell 使用 `Copy-Item .env.example .env`，Linux/macOS 使用 `cp .env.example .env`。已有文件直接编辑，不覆盖。
 
@@ -37,7 +37,7 @@ cd LysBot
 ## 2. 构建并准备本地向量模型
 
 ```bash
-docker compose build
+docker compose build bot
 docker compose run --rm setup
 docker compose run --rm --no-deps bot python scripts/doctor.py --json
 ```
@@ -88,7 +88,7 @@ docker compose exec bot python scripts/healthcheck.py
 
 在测试群 @ bot 发送文字，确认 QQ 收到实际回复。master 可发送 `/status` 检查路由、`/usage` 查看用量。语义检索还需等待后台索引，状态检查见 [配置说明](docs/configuration.md)。没有填专用模型时，相应能力关闭是正常行为。
 
-修改 `.env` 后执行 `docker compose up -d --force-recreate bot`；修改源码后执行 `docker compose up -d --build bot`。不要用 `docker compose down -v` 清理数据。
+修改 `.env` 后执行 `docker compose up -d --no-deps --force-recreate bot`；源码更新按 [统一更新流程](docs/ai-operations.md#构建与更新) 构建、诊断、替换和验证。不要用 `docker compose down -v` 清理数据。
 
 ## 排错
 
@@ -100,4 +100,4 @@ docker compose exec bot python scripts/healthcheck.py
 
 ## 本地 Python 开发
 
-使用 Python 3.11+ 虚拟环境，运行 `python -m pip install -e ".[dev]"`。在根目录执行 `python scripts/prepare_local_embedding.py` 准备模型，再执行 `python bot.py`。NapCat 与 bot 同宿主机时客户端地址改为 `ws://127.0.0.1:8080/onebot/v11/ws`。常规验证使用 `python scripts/run_tests.py`，不连接 QQ 或调用真实模型。
+本节用于调试和测试，正式部署使用上面的 Compose 流程。使用 Python 3.11+ 虚拟环境，运行 `python -m pip install -e ".[dev]"`。在根目录执行 `python scripts/prepare_local_embedding.py` 准备模型，再执行 `python bot.py`。NapCat 与 bot 同宿主机时客户端地址改为 `ws://127.0.0.1:8080/onebot/v11/ws`。常规验证使用 `python scripts/run_tests.py`，不连接 QQ 或调用真实模型。
