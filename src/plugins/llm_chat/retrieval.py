@@ -224,7 +224,7 @@ class HistorySearch:
         except (sqlite3.Error, OSError):
             return None
 
-    def _snapshot(self, sid, *, verify_vectors=True):
+    def _snapshot(self, sid):
         with self._connect() as db:
             db.execute("BEGIN")
             gen = generation(db, sid)
@@ -236,11 +236,6 @@ class HistorySearch:
             settings = db.execute("SELECT value FROM kv_meta WHERE key=?", ("memory_embedding:" + version,)).fetchone()
             jobs = db.execute(
                 "SELECT count(*),min(source_id) FROM memory_index_jobs WHERE session_id=? AND generation=?", (sid, gen)
-            ).fetchone()
-            counts = db.execute(
-                """SELECT count(*),sum(CASE WHEN vector_version=? AND vector_hash=content_hash THEN 1 ELSE 0 END)
-                FROM memory_items WHERE session_id=? AND generation=?""",
-                (version, sid, gen),
             ).fetchone()
             chunk = db.execute("SELECT value FROM kv_meta WHERE key='memory_active_chunk'").fetchone()
             by_source = {}
@@ -258,19 +253,6 @@ class HistorySearch:
                     "pending": pending[0],
                     "failed": pending[2] or 0,
                 }
-            vector_ready = counts[1] or 0
-            vector_count_verified = False
-            if verify_vectors and re.fullmatch(r"[a-f0-9]{16}", version):
-                try:
-                    with self._connect(vectors=True) as vectors:
-                        vector_ready = vectors.execute(
-                            f"""SELECT count(*) FROM memory_vec_{version} v JOIN memory_items m ON m.id=v.item_id
-                            WHERE v.session_id=? AND m.session_id=? AND m.generation=? AND v.content_hash=m.content_hash""",
-                            (sid, sid, gen),
-                        ).fetchone()[0]
-                        vector_count_verified = True
-                except (ImportError, sqlite3.Error, OSError, RuntimeError):
-                    vector_ready = 0
             return (
                 gen,
                 version,
@@ -279,9 +261,6 @@ class HistorySearch:
                     "source_revision": int(revision[0]) if revision else 0,
                     "projection_jobs_pending": jobs[0],
                     "earliest_pending_source": jobs[1],
-                    "items": counts[0],
-                    "vectors_ready": vector_ready,
-                    "vectors_verified": vector_count_verified,
                     "embedding_version": version,
                     "chunk_version": chunk[0] if chunk else CHUNK_VERSION,
                     "by_source": by_source,
@@ -352,9 +331,7 @@ class HistorySearch:
             subject_ids = [str(int(v)) for v in subject_ids or []]
             if any(len(v) > 50 for v in sender_names or []):
                 raise ValueError("invalid_name")
-            gen, version, settings, coverage = await asyncio.to_thread(
-                self._snapshot, sid, verify_vectors=mode in {"hybrid", "semantic"} and bool(query) and not exact_phrase
-            )
+            gen, version, settings, coverage = await asyncio.to_thread(self._snapshot, sid)
             filters = {
                 "sources": sources,
                 "author_ids": author_ids,
@@ -418,8 +395,6 @@ class HistorySearch:
                     return failure("scope_changed_retry_search", retryable=True)
             if coverage["projection_jobs_pending"]:
                 warnings.append("index_incomplete_original_search_included")
-            if mode in {"hybrid", "semantic"} and coverage["vectors_ready"] < coverage["items"]:
-                warnings.append("vector_coverage_incomplete")
             effective = (
                 mode
                 if (

@@ -8,6 +8,7 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
+from contextlib import contextmanager
 
 import nonebot
 
@@ -157,7 +158,7 @@ class SearchStorageTests(unittest.IsolatedAsyncioTestCase):
         expired = await self.search.search("group_7", cursor=first["next_cursor"], **query)
         self.assertEqual(expired["error"]["code"], "cursor_expired_retry_search")
 
-    async def test_index_catchup_expires_search_cursor_without_a_source_write(self):
+    async def test_vector_backfill_keeps_keyword_cursor_when_results_are_unchanged(self):
         query = {"mode": "keyword", "query": "RTX", "sources": ["messages"], "limit": 1}
         first = await self.search.search("group_7", **query)
         revision = first["coverage"]["source_revision"]
@@ -165,8 +166,11 @@ class SearchStorageTests(unittest.IsolatedAsyncioTestCase):
         vector = struct.pack("<512f", 1, *([0] * 511))
         await asyncio.to_thread(self.index._commit_vectors, rows, [vector] * len(rows))
         self.assertEqual(self.search._snapshot("group_7")[3]["source_revision"], revision)
-        expired = await self.search.search("group_7", cursor=first["next_cursor"], **query)
-        self.assertEqual(expired["error"]["code"], "cursor_expired_retry_search")
+        second = await self.search.search("group_7", cursor=first["next_cursor"], **query)
+        self.assertNotIn("error", second)
+        self.assertTrue(second["items"])
+        self.assertEqual(first["coverage"], second["coverage"])
+        self.assertTrue({row["id"] for row in first["items"]}.isdisjoint(row["id"] for row in second["items"]))
 
     async def test_backend_recovery_expires_cursor_when_candidate_ranks_change(self):
         vector = struct.pack("<512f", 1, *([0] * 511))
@@ -615,7 +619,7 @@ class SearchStorageTests(unittest.IsolatedAsyncioTestCase):
         await asyncio.to_thread(rebuilt._activate_if_complete)
         snapshot = self.search._snapshot("group_7")
         self.assertEqual(snapshot[1], self.index.version)
-        self.assertGreater(snapshot[3]["vectors_ready"], 0)
+        self.assertGreater(operation_snapshot(self.manager._db_path, self.index.version)["vectors_ready"], 0)
         await asyncio.to_thread(rebuilt._commit_vectors, pending[1:], [vector] * len(pending[1:]))
         await asyncio.to_thread(rebuilt._activate_if_complete)
         self.assertEqual(self.search._snapshot("group_7")[1], rebuilt.version)
@@ -700,12 +704,33 @@ class SearchStorageTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(fact["subjects"], ["202"])
         self.assertEqual(fact["evidence_kind"], "derived_assertion")
 
-    async def test_keyword_does_not_scan_physical_vectors_for_coverage(self):
-        with patch.object(self.search, "_connect", wraps=self.search._connect) as connection:
-            found = await self.search.search("group_7", mode="keyword", exact_phrase="5090")
-        self.assertTrue(found["items"])
-        self.assertFalse(found["coverage"]["vectors_verified"])
+    async def test_snapshot_does_not_scan_memory_items_or_physical_vectors(self):
+        statements = []
+        original = self.search._connect
+
+        @contextmanager
+        def traced_connection(**kwargs):
+            with original(**kwargs) as db:
+                db.set_trace_callback(statements.append)
+                yield db
+
+        with patch.object(self.search, "_connect", side_effect=traced_connection) as connection:
+            self.search._snapshot("group_7")
         self.assertFalse(any(call.kwargs.get("vectors") for call in connection.call_args_list))
+        self.assertFalse(any("memory_items" in sql.lower() or "memory_vec_" in sql.lower() for sql in statements))
+
+    async def test_search_does_not_report_vector_coverage(self):
+        vector = struct.pack("<512f", 1, *([0] * 511))
+        rows = await asyncio.to_thread(self.index._pending_vectors)
+        await asyncio.to_thread(self.index._commit_vectors, rows, [vector] * len(rows))
+        with patch("src.plugins.llm_chat.retrieval.embed", AsyncMock(return_value=[vector])):
+            for mode in ("keyword", "hybrid", "semantic"):
+                with self.subTest(mode=mode):
+                    found = await self.search.search("group_7", mode=mode, query="4090")
+                    self.assertTrue(found["items"])
+                    for field in ("items", "vectors_ready", "vectors_verified"):
+                        self.assertNotIn(field, found["coverage"])
+                    self.assertNotIn("vector_coverage_incomplete", found["warnings"])
 
     async def test_correction_keeps_attempts_without_reusing_answer_as_evidence_or_actions(self):
         old = AgentRunner("group_7")
