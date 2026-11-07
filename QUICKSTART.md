@@ -32,6 +32,8 @@ cd LysBot
 
 不用填写搜索、视觉、语音、生图或向量模型配置。通用模型需支持工具调用。不要把 `.env`、数据库、登录状态或二维码提交到 Git、粘贴到 issue 或排错报告中。
 
+有多个可用模型时，按 [provider 推荐顺序与角色分配](docs/providers.md) 选型：CLIProxyAPI → NVIDIA → OpenRouter → DashScope / TokenHub / 火山方舟。优先为 `MODEL_PLANNER` 选择行为决策逻辑可靠的强模型，为 `MODEL_CHAT` 选择语言风格好的强模型；Antigravity 的 Claude / Gemini 额度较少时可优先用于 chat。最简部署仍可只配 general，不要求填满所有角色。
+
 ## 2. 构建并准备本地向量模型
 
 ```bash

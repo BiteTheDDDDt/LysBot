@@ -2,6 +2,8 @@
 
 这是交给部署 AI 的操作说明。已有可用 Codex 账号时，优先用 CLIProxyAPI 把上游能力统一接入 LysBot：聊天、规划、摘要、识图，以及实际可用的搜索和生图。TTS 单独走 Google 原生 API。没有适用账号或偏好直连 API 时，按 [provider 指南](providers.md) 选普通 API 即可。
 
+同一网关也可接入 Grok、Antigravity 的可用免费模型。Antigravity 提供的 Claude / Gemini 额度较少时，可优先用于 `MODEL_CHAT`；`MODEL_PLANNER` 另选逻辑性强的模型。具体型号、免费范围与角色分配见 [provider 指南](providers.md)。新增渠道由 AI 按固定版本的上游登录说明完成授权并查询模型列表，不能直接沿用 Codex 的登录参数。
+
 CLIProxyAPI 是第三方开源网关。它通过账号授权使用上游权益，不把订阅变成无限额度；LysBot 也不提供模型额度。[上游项目](https://github.com/router-for-me/CLIProxyAPI) 与 [OpenAI 账号授权说明](https://learn.chatgpt.com/docs/auth) 分别描述代理实现和官方登录方式，不能据此推定第三方网关获得官方背书。账号可用型号和限制以当前权益为准；订阅、普通 API 计费及可领取的 API credits 也应分别核对，见 [官方计费](https://learn.chatgpt.com/docs/pricing) 和 [API credits 范围](https://developers.openai.com/api/docs/guides/chatgpt-api-credits)。
 
 ## 1. 由 AI 准备私有配置

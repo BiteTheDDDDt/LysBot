@@ -71,6 +71,8 @@ LysBot 是一个有长期记忆、能查资料、会接梗的 QQ 群友，默认
 
 如果需要分别控制成本和效果，可用 `MODEL_CHAT`、`MODEL_PLANNER`、`MODEL_SUMMARY`、`MODEL_IMPORTANT_INFO` 覆盖具体任务；不填时继承 `MODEL_GENERAL`。`MODEL_FALLBACK` 可配置普通文本任务的备用模型，多个候选使用 ` | ` 分隔。
 
+推荐优先给 **planner 和 chat 配强模型**：前者侧重行为决策的逻辑性，后者侧重最终输出的语言风格，两者可以使用不同模型。额度较少但语言表现好的模型可优先分配给 chat，具体选型见 [provider 指南](docs/providers.md#文本角色怎么分配)。
+
 ### 简报、新闻与群名片
 
 | 配置 | 功能与依赖 |
