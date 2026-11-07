@@ -1,6 +1,6 @@
 # Provider、模型能力与费用
 
-核对日期：2026-11-07。本页覆盖 LysBot 注册的全部 12 个 provider。模型、活动和账号权限会变化；下面列选型方向与例子，不是完整型号目录或长期价格承诺。部署 AI 应核对官方目录及当前账号，再执行实际验证。
+本页介绍 LysBot 支持的 provider、模型能力和费用。具体型号与额度以服务商目录和账号权限为准。
 
 ## 怎么选
 
@@ -9,7 +9,7 @@
 推荐顺序是本项目的部署选型倾向：
 
 1. **CLIProxyAPI**：优先复用 Codex 套餐；还可接 Grok、Antigravity 的可用免费模型。Antigravity 可以提供 Claude / Gemini，额度较少时优先考虑放在 `MODEL_CHAT`，把有限额度用于最终表达。
-2. **NVIDIA**：有免费开发体验模型；维护者使用中，可用性和延迟波动很大，选型时要实测，不能只看模型本身的能力。
+2. **NVIDIA**：有免费开发体验模型；可用性和延迟波动很大，选型时要实测，不能只看模型本身的能力。
 3. **OpenRouter**：不定期有短期免费模型，也有一些较长期提供的免费型号，适合试用与备用；以实时免费目录为准。
 4. **DashScope / 腾讯 TokenHub / 火山方舟**：同一推荐层级，可按所选模型开通或领取试用额度，适合逐个体验模型；有效期、账号内共享关系和用尽后行为分别核对控制台。
 
@@ -22,7 +22,7 @@
 | provider | 模型选择方向 / 示例 | LysBot 当前能力 | 免费与付费方式、官方入口 |
 | --- | --- | --- | --- |
 | `cliproxyapi` | Codex 套餐中的 GPT（如 `gpt-6-luna`）、GPT Image；也可接 Grok 与 Antigravity 的 Claude / Gemini | 文本；白名单识图、GPT 原生搜索、GPT Image 生图/编辑 | 首选账号授权网关：Codex 使用套餐额度；Grok / Antigravity 有部分免费可用模型，Antigravity 额度较少，可优先分配给 chat。精确型号与权益以账号为准。[上游项目](https://github.com/router-for-me/CLIProxyAPI)、[Antigravity 型号与套餐](https://antigravity.google/docs/models/)、[Codex 计费](https://learn.chatgpt.com/docs/pricing) |
-| `nvidia` | NIM 目录中的 Kimi / Qwen / Nemotron / Gemma 等，以目录完整 ID 为准 | 文本；Gemma 或已适配 Nemotron Omni 识图 | 有免费开发体验模型。维护者使用中，可用性和延迟非常不稳定，建议实测并准备备用路由；生产使用另核对许可/订阅，自部署有 GPU 等成本。[NIM FAQ](https://docs.api.nvidia.com/nim/docs/product)、[NIM 提供方式](https://docs.nvidia.com/nim/large-language-models/latest/day-0/index.html) |
+| `nvidia` | NIM 目录中的 Kimi / Qwen / Nemotron / Gemma 等，以目录完整 ID 为准 | 文本；Gemma 或已适配 Nemotron Omni 识图 | 有免费开发体验模型。可用性和延迟非常不稳定，建议实测并准备备用路由；生产使用另核对许可/订阅，自部署有 GPU 等成本。[NIM FAQ](https://docs.api.nvidia.com/nim/docs/product)、[NIM 提供方式](https://docs.nvidia.com/nim/large-language-models/latest/day-0/index.html) |
 | `openrouter` | 多家模型；ID 含厂商前缀；目录中实际存在的 `:free` 变体或 `openrouter/free` | 文本、工具调用；未接其搜索/视觉/生图专用能力 | 不定期有短期免费模型，也有较长期提供的免费型号；免费模型单独限流，部分需购入 credits 才有较高配额；付费模型充值 credits 后按实际用量扣除，购买 credits 有平台手续费。[免费目录](https://openrouter.ai/collections/free-models/)、[FAQ 与计费](https://openrouter.ai/docs/faq) |
 | `dashscope` | 百炼 Qwen 系列，按成本选择 Flash / Plus / Max 等；搜索可选支持联网的 Qwen | 文本、原生搜索 | 部分地域和模型有新人限时额度；实时 API 通常按量付费，也有资源包/套餐。免费额度用尽可能转付费，可开启用完即停。套餐专属 key/URL 不能和通用 API 混用。[免费额度](https://help.aliyun.cn/zh/model-studio/new-free-quota)、[账单与计费模式](https://help.aliyun.cn/zh/model-studio/bill-query-and-cost-management) |
 | `tencentmaas` | 腾讯云 TokenHub 的 DeepSeek / 混元等模型，复制控制台 model ID | 文本、工具调用；平台其他多模态产品尚未接入专用角色 | 可按模型领取新人体验额度；额度有效期及共享规则以控制台为准。普通语言 API 按输入、输出、缓存 token 后付费，另有独立套餐。[新人体验包](https://cloud.tencent.com/document/product/1823/130053)、[计费方式](https://cloud.tencent.com/document/product/1823/130054)、[模型入口](https://cloud.tencent.com/product/tokenhub) |
@@ -34,7 +34,7 @@
 | `siliconflow` | DeepSeek / Qwen / GLM 等；如 `deepseek-ai/DeepSeek-V4.1-Flash`；视觉选 Qwen-VL / GLM-V 型号 | 文本、白名单识图 | 价格页有免费及付费型号；同系列或带 `Pro/` 的条目不一定同价。付费按模型输入/输出/缓存等用量计费，赠送余额只是试用额度。[当前模型价格](https://www.siliconflow.cn/pricing) |
 | `xiaomimimo` | 小米 MiMo 文本系列；当前平台还提供多模态/语音产品 | 文本、工具调用；本项目未接其 TTS/搜索/生图 | 普通 API key 按实际 token 消耗账户余额；Token Plan 是另一套订阅额度，不互通。免费 TTS 等活动不等于本项目已适配或文本 API 永久免费。[API 定价](https://mimo.mi.com/docs/en-US/pricing)、[平台及套餐](https://platform.xiaomimimo.com/) |
 
-Antigravity 的免费型号也会调整：核对时 Claude Sonnet / Opus 4.6 可用，但官方计划于 2026-11-18 移除；较新的 Claude 型号有付费套餐要求。部署 AI 应按当前账号列出的模型选择，不把“可通过 Antigravity 接 Claude”理解为所有 Claude 型号一直免费。[官方型号表](https://antigravity.google/docs/models/)
+Antigravity 的 Claude / Gemini 型号与免费额度随套餐变化，部署时查询账号可用列表。[官方型号表](https://antigravity.google/docs/models/)
 
 ## 文本角色怎么分配
 
@@ -65,23 +65,20 @@ Antigravity 的免费型号也会调整：核对时 Claude Sonnet / Opus 4.6 可
 
 ## 推荐配置组合
 
-### Codex 网关承担大部分能力，Google 承担语音
+### 多 provider 与自动 fallback
 
-以下是账号可用时的候选示例；按 [网关指南](cliproxyapi.md) 逐项验证，不支持的项留空。
+完整组合见 [.env.models.example](../.env.models.example)，包含 GPT planner、多 provider chat、识图候选链、Google TTS 和生图。把需要的路由合并到 `.env`，并填写对应 provider 凭据。
+
+例如该组合中的摘要和全局备用：
 
 ```dotenv
-MODEL_GENERAL=cliproxyapi:gpt-6-luna
-# 按账号实际模型 ID，优先为这两个角色选强模型：
-# MODEL_PLANNER=cliproxyapi:your-strong-planner-model-id
-# MODEL_CHAT=cliproxyapi:your-preferred-chat-model-id
-MODEL_VISION=cliproxyapi:gpt-6-luna
-MODEL_SEARCH=cliproxyapi:gpt-6-luna
-MODEL_IMAGE_GEN=cliproxyapi:gpt-image-2
-CLIPROXYAPI_BASE_URL=http://cliproxyapi:8317/v1
-CLIPROXYAPI_API_KEY=replace-with-your-local-proxy-key
-MODEL_TTS=google:gemini-3.1-flash-tts-preview
-GOOGLE_API_KEY=replace-with-your-google-key
+MODEL_SUMMARY="cliproxyapi:gpt-6-luna | google:gemini-3.5-flash-lite"
+MODEL_FALLBACK="google:gemini-3.5-flash-lite | openrouter:nvidia/nemotron-3-ultra-550b-a55b:free"
 ```
+
+每次摘要先尝试 GPT，再尝试 Google；自身链耗尽后再进入全局备用。候选不会去重，因此这里 Google 会再次出现。未配置凭据或正在接口冷却中的候选会跳过；总时间预算耗尽或任务取消时不再继续尝试。
+
+` | ` 同样适用于 `MODEL_CHAT`、`MODEL_PLANNER`、`MODEL_GENERAL` 及其他模型配置。专用能力也可配多个候选，但不追加普通文本的 `MODEL_FALLBACK`；每个候选须符合该能力的协议限制。完整规则见 [配置手册](configuration.md#候选链与自动-fallback)。
 
 ### 不部署网关，先用一个普通 API
 

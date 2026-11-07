@@ -17,6 +17,25 @@
 
 显式配置了错误 provider、协议不支持的型号或无可用凭据时，启动会报告配置错误。未配置的能力从工具目录移除，后台入口和执行入口也不发起对应模型调用。
 
+## 候选链与自动 fallback
+
+每个 `MODEL_*` 都可以在同一行用 ` | ` 配置多个候选，左边优先。调用失败时按顺序尝试后面的模型，可以跨 provider：
+
+```dotenv
+MODEL_SUMMARY="cliproxyapi:gpt-6-luna | google:gemini-3.5-flash-lite"
+MODEL_FALLBACK="google:gemini-3.5-flash-lite | openrouter:nvidia/nemotron-3-ultra-550b-a55b:free"
+```
+
+该例的摘要候选顺序为：GPT → Google → Google（全局备用）→ OpenRouter。链中重复项保留，表示再次尝试；不会自动去重。没有配置凭据、能力不匹配或仍在接口冷却期的候选会跳过。整个任务的超时预算耗尽或被取消后停止，不保证每次都尝试完整条链。
+
+- `MODEL_GENERAL`、`MODEL_CHAT`、`MODEL_PLANNER`、`MODEL_SUMMARY`、`MODEL_IMPORTANT_INFO` 等普通文本角色：自身候选链后追加 `MODEL_FALLBACK`。
+- 未单独填写的 chat、planner、summary、important_info：继承 `MODEL_GENERAL` 的完整候选链，再追加全局备用。
+- `MODEL_SEARCH`、`MODEL_VISION`、`MODEL_TTS`、`MODEL_IMAGE_GEN`：只尝试各自显式配置的链，不追加 `MODEL_FALLBACK`。每个候选都要符合该专用能力的协议限制。
+
+完整多模型组合见 [.env.models.example](../.env.models.example)：GPT 用于 planner，多 provider chat 按顺序回退，识图也配置多个候选，TTS 单独使用 Google。示例只包含模型路由，需要与 [.env.example](../.env.example) 的 QQ 配置及 provider 凭据合并使用。
+
+修改 `.env` 后用 `docker compose up -d --force-recreate bot` 应用，再在 QQ 用 `/status` 检查实际角色链。`/model` 只临时覆盖当前会话的聊天模型，不替代持久配置。
+
 ## 人设和群聊行为
 
 `PERSONA_FILE` 默认是 `personas/phosphophyllite.toml`，文件包含角色名称、性格与口吻、外貌和声音。通用执行规则由程序维护。更换人设后重启 bot。
@@ -41,4 +60,4 @@ docker compose exec bot python scripts/agentic_search_ops.py status --database /
 
 ## 命令
 
-master 可使用 `/status`、`/model`、`/usage`、`/summary`、`/clear`。完整清空仍需明确确认。群友可使用 `/jrrp`、`/memory`，也可以在对话中要求查看和纠正自己的记忆。纠错保留预览、确认、撤销和冲突检查。
+完整命令、别名、参数、权限及作用范围见 [QQ 使用手册](commands.md)。

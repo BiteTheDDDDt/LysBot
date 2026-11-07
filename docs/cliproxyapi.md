@@ -14,7 +14,7 @@ CLIProxyAPI 是第三方开源网关。它通过账号授权使用上游权益�
 2. 使用密码学随机数生成长本地访问密钥，替换 `access.api-keys` 的占位值，并填入 `.env` 的 `CLIPROXYAPI_API_KEY`；不在终端输出密钥。此 key 与 `ACCESS_TOKEN` 各自生成，作用不同。
 3. 私有配置与授权目录都在 Git 忽略的 `data/` 内；限制为部署账号可读。不要把 OAuth JSON、授权回调 URL 或浏览器会话粘贴到报告中。
 
-模板采用 CLIProxyAPI v8 配置。覆盖文件固定为 `v8.0.59`，已核对上游配置结构与镜像标签；升级前先对照[同版本上游配置](https://github.com/router-for-me/CLIProxyAPI/blob/v8.0.59/config.example.yaml)，不要直接用不同大版本模板。模板关闭管理面板和请求正文日志，仅保留本地调用所需设置；`disable-image-generation: chat` 保留 Images API，避免给普通聊天注入画图工具。
+模板采用 CLIProxyAPI v8 配置。覆盖文件固定为 `v8.0.59`；升级前先对照[同版本上游配置](https://github.com/router-for-me/CLIProxyAPI/blob/v8.0.59/config.example.yaml)，不要直接用不同大版本模板。模板关闭管理面板和请求正文日志，仅保留本地调用所需设置；`disable-image-generation: chat` 保留 Images API，避免给普通聊天注入画图工具。
 
 ## 2. 首次 Codex 授权
 
@@ -76,7 +76,3 @@ GOOGLE_API_KEY=replace-with-your-google-key
 回到 [QUICKSTART](../QUICKSTART.md) 完成 build、setup、doctor、NapCat 登录与实际 QQ 回复验证。网关是独立的可选服务，普通 `docker compose up -d` 仍可启动 Bot 与 NapCat；首次和重启网关使用上面的双文件命令。
 
 更新网关时先保留私有 config/auth 的备份，修改 `compose.cliproxyapi.yaml` 的版本并检查新配置，再拉取和重建这个服务；不要批量更新其他生产服务。升级后重新验证实际启用的接口。429 先检查上游额度和限流，401 先检查本地 key 与 OAuth 状态；连接失败先检查服务名、网络和端口。部署结果分开报告网关、模型能力、NapCat、QQ 回复及本地向量状态。
-
-## 本仓库已验证的范围
-
-2026-11-07：合并 Compose 配置校验通过；使用固定 `v8.0.59` 镜像、模板配置和虚构密钥，在无外网的临时容器启动成功，认证后的模型列表返回 200，未认证请求返回 401。推荐 MODEL 组合通过本地 doctor 与能力规则检查。验证未使用真实 OAuth、QQ 或模型额度，因此实际账号授权、搜索、生图及 TTS 仍需部署 AI 按上面步骤验证。
