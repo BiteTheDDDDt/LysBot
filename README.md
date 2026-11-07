@@ -17,22 +17,29 @@ LysBot 是一个有长期记忆、能查资料、会接梗的 QQ 群友，默认
 
 ## 2. 快速开始：直接交给 AI
 
-把下面这段话复制给你的 **Codex / Claude Code**，或其他能操作本机、服务器的 AI 编程助手：
+### 如果你是人类
+
+直接把下面这段话发给你的 **Codex / Claude Code**，或其他能操作本机、服务器的 AI 编程助手：
 
 ```text
-帮我部署这个项目：https://github.com/BiteTheDDDDt/LysBot
-
-先阅读仓库的 AGENTS.md 和 QUICKSTART.md，按文档完成环境检查、安装、
-配置、启动和验证。已有配置与数据要保留，不要覆盖。
-需要我填写模型凭据、提供 QQ 账号信息或扫码时再告诉我，不要回显密钥。
-NapCat 的连接配置由你完成；最后确认 bot 能在 QQ 中实际收到消息并回复。
+帮我部署并运行 LysBot：https://github.com/BiteTheDDDDt/LysBot
+请按 README 中“如果你是 AI”的指引完成配置，并验证它能在 QQ 中回复消息。
 ```
 
-你需要准备一个用作 bot 的 QQ 账号、可用的模型服务，以及自己的 master QQ 号。首次登录由你用手机 QQ 扫码确认；安装依赖、准备本地向量模型、配置 NapCat 和排错都可以让 AI 处理，不需要自己进 WebUI 填连接表单。
+准备好以下几样东西：
 
-基础聊天只需配置一个 `MODEL_GENERAL` 和对应服务凭据，无需额外部署向量数据库、embedding 服务或 GPU。默认人设已经配好，更多能力可以跑通之后再加。
+- 一个用作 bot 的 **QQ 账号**，首次登录时用手机 QQ 扫码确认。
+- **你自己的 QQ 号**，作为 master 管理账号。
+- 一个支持工具调用的**模型服务**：模型 ID、API key，以及需要时的 API 地址。密钥可以直接填入本地 `.env`。
+- 一台 **AI 可以操作的电脑或服务器**，用来运行 bot。
 
-具体部署步骤见 [QUICKSTART.md](QUICKSTART.md)，诊断与维护入口见 [AI 操作说明](docs/ai-operations.md)。
+剩下的安装、配置、启动和排错交给 AI。基础聊天只需一个通用模型，默认磷叶石人设已经配好，无需额外准备 GPU、向量数据库或 embedding 服务。
+
+### 如果你是 AI
+
+请先阅读 [AGENTS.md](AGENTS.md)，再按照 [QUICKSTART.md](QUICKSTART.md) 完成环境检查、安装、配置、启动和验证。诊断、扫码接入和维护接口见 [AI 操作说明](docs/ai-operations.md)，配置含义见 [配置与运行说明](docs/configuration.md)。
+
+由你完成依赖安装、本地向量模型准备和 NapCat 连接配置；缺少必要信息时向用户询问，需要登录时展示私有二维码，让用户用手机 QQ 扫码。保留已有配置与数据，不回显密钥，不把 WebUI 表单配置交给用户。最后确认 bot 能在 QQ 中实际收到消息并回复，再报告部署结果。
 
 ## 3. 可选功能与手工配置
 
