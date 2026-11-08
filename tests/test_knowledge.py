@@ -117,6 +117,27 @@ class KnowledgeTests(unittest.TestCase):
         self.assertIn("knowledge_directory_missing", missing["warnings"])
 
 
+class KnowledgeOverviewTests(unittest.TestCase):
+    def test_fixed_storage_metadata_and_configured_categories_need_no_directory_scan(self):
+        with (
+            patch.object(config, "knowledge_dir", "missing-knowledge-directory"),
+            patch.object(config, "knowledge_overview", "数据库术语；游戏机制；故障排查方法"),
+            patch.object(KnowledgeStore, "_documents", side_effect=AssertionError("no dynamic catalog")),
+        ):
+            prompt = get_tool_usage_prompt()
+        self.assertIn("聊天原文及作者、时间、引用关系", prompt)
+        self.assertIn("长期记忆及其来源", prompt)
+        self.assertIn("数据库术语；游戏机制；故障排查方法", prompt)
+        self.assertIn("不表示具体资料一定存在", prompt)
+
+    def test_disabling_static_knowledge_keeps_db_metadata_without_static_categories(self):
+        with patch.object(config, "knowledge_dir", ""), patch.object(config, "knowledge_overview", "custom-category"):
+            prompt = get_tool_usage_prompt()
+        self.assertIn("DB（动态知识", prompt)
+        self.assertNotIn("custom-category", prompt)
+        self.assertNotIn("search_knowledge", prompt)
+
+
 class KnowledgeToolTests(unittest.IsolatedAsyncioTestCase):
     async def test_read_only_tools_are_available_without_database_or_special_model(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -62,6 +62,8 @@ docker compose exec bot python scripts/agentic_search_ops.py status --database /
 
 动态知识库来自实际群聊、摘要与记忆，使用 `recall_history/read_history/query_history` 检索。静态知识库由部署者预设，使用 `search_knowledge/read_knowledge` 检索；两者并列，按问题需要结合，不互相覆盖。
 
+planner 常驻的元信息只有固定存储范围：DB 包含聊天原文及作者、时间、引用关系、摘要、长期记忆与来源、生成媒体记录；knowledge 默认分为项目信息、背景知识、skill 方法。可通过 `KNOWLEDGE_OVERVIEW` 用一句话说明自己部署的静态知识类别。新增文档无需更新概述，只有类别变化时再改；不会自动扫描生成目录、统计数据量或时间覆盖，也不注入正文，具体资料和变化交给实际检索确认。
+
 默认从 `knowledge/` 读取 UTF-8 Markdown／文本文件，包含 LysBot 项目信息。可让 AI 在 `knowledge/local/` 添加领域资料、术语或 skill，例如：
 
 ```text
