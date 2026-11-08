@@ -2,7 +2,7 @@
 
 把本文件交给 AI 助手时，可以说：
 
-> 阅读 AGENTS.md 和 QUICKSTART.md，帮我在独立目录部署 LysBot。保留已有配置和数据，不回显密钥；自动完成 NapCat 配置，把二维码私下展示给我扫码。验证实际 QQ 回复，并分别报告模型、连接和向量索引的状态。
+> 选择 LysBot 最新正式 Release，固定对应 tag，阅读该版本的 AGENTS.md 和 QUICKSTART.md，在独立目录部署。保留已有配置和数据，不回显密钥；自动完成 NapCat 配置，把二维码私下展示给我扫码。验证实际 QQ 回复，并报告版本号、模型、连接和向量索引的状态。
 
 下面的命令供 AI 执行；人只需提供或填写 `.env`，并在手机 QQ 中完成首次登录确认。
 
@@ -10,12 +10,15 @@
 
 ## 1. 准备环境与配置
 
-首次部署先克隆仓库并进入目录；已经在正确的 checkout 中则跳过，不重复克隆或覆盖。
+先查询 [最新正式 Release](https://github.com/BiteTheDDDDt/LysBot/releases/latest)，选择非 draft、非 prerelease 的发行版，阅读发行说明。用户指定版本时使用指定版本。首次部署按该 tag 克隆，下面的 `<发行版tag>` 由 AI 替换为查到的实际值：
 
 ```bash
-git clone https://github.com/BiteTheDDDDt/LysBot.git
+git clone --branch <发行版tag> https://github.com/BiteTheDDDDt/LysBot.git
 cd LysBot
+git rev-parse HEAD
 ```
+
+已经在正确的 checkout 中则跳过克隆，核对 tag 和提交 SHA；已有配置或未提交修改时先保留，不强制覆盖。后续步骤以所选 tag 内的文档为准。若项目尚未发布正式 Release，明确说明，临时使用当时的 main 提交并记录 SHA；仅网络错误或查询失败不能当作“尚未发行”。
 
 默认部署方式是 Docker Compose：由 AI 使用本仓库 Dockerfile 在部署机器构建镜像并运行，项目自身的生产环境也使用同一流程。Windows 可使用 Docker Desktop 的 Linux 容器。在 LysBot 根目录执行 `docker version` 和 `docker compose version`，确认引擎可用。
 

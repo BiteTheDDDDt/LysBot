@@ -6,8 +6,9 @@ LysBot 的人机边界：人在 QQ 里聊天和管理，最多编辑 `.env`；�
 
 公开部署和项目自身的生产环境统一使用仓库内的 Dockerfile、Compose 文件与以下更新流程。首次安装见 [QUICKSTART](../QUICKSTART.md)。私有配置、人设、插件、现有数据卷和网络通过 `.env`、挂载或 Compose override 接入。
 
-1. 选择要部署的源码提交，完成相关测试；保留当前运行镜像的独立回退标签、现有配置及必要的数据备份，不覆盖未提交的修改。
-2. 在该源码版本构建 bot 镜像，构建完成后先检查配置，再替换运行实例：
+1. 查询最新正式 Release（排除 draft、prerelease），与当前部署版本比较，阅读发行说明中的配置、数据及升级注意事项。用户指定版本时遵从指定；已经是目标版本时无需重建。普通升级不使用 `git pull` 跟随 main。
+2. 保留当前源码 tag／SHA、运行镜像的独立回退标签、现有配置及必要的数据备份，不覆盖未提交的修改。获取目标 tag 并固定到该版本；在保留本地改动后执行 `git fetch origin --tags`、`git checkout --detach <发行版tag>`，不使用强制切换或清理。若用户需要开发版或未发布修复，记录所选提交 SHA；尚无正式 Release 时的处理见 QUICKSTART。
+3. 阅读所选 tag 内的文档，核对该版本的检查结果及升级要求。在该源码版本构建 bot 镜像，构建完成后先检查配置，再替换运行实例：
 
 ```bash
 docker compose build bot
@@ -16,7 +17,7 @@ docker compose up -d --no-deps bot
 docker compose exec bot python scripts/healthcheck.py
 ```
 
-3. 检查 QQ 实际回复及本次修改涉及的功能，报告源码版本与验证结果。doctor 不调用真实模型，不能代替功能验证。
+4. 检查 QQ 实际回复及本次修改涉及的功能，记录并报告发行版 tag、提交 SHA、运行镜像与验证结果。doctor 不调用真实模型，不能代替功能验证。
 
 使用私有 override 的部署，每条命令都沿用同一组 Compose 文件和项目名，避免意外创建第二个实例。只更新 bot 时保留现有 NapCat、CLIProxyAPI 与数据；不顺带升级这些服务。配置检查失败时先修复，已有运行实例继续使用原镜像。
 

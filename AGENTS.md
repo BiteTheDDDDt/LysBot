@@ -6,6 +6,8 @@ LysBot 对 AI 友好：部署、运维和开发由 AI 通过仓库文档与稳�
 
 正式部署统一使用本仓库的 Dockerfile 和 Docker Compose，从选定的源码版本构建镜像后运行；项目自身的生产环境遵循同一流程。部署差异通过 `.env`、挂载的人设/私人插件和必要的 Compose override 表达，不维护另一套核心源码或构建方式。更新步骤见 `docs/ai-operations.md`；本地 Python 直接运行用于调试和测试。
 
+普通部署和升级默认选择 GitHub 最新正式 Release，排除 draft 和 prerelease，固定到对应 tag，并阅读该 tag 下的文档。用户指定版本时遵从指定；仅在用户要求开发、提前体验或排查未发布修复时使用 main／指定提交。若尚无正式 Release，明确说明后使用当时的 main 提交并记录 SHA，不能称其为发行版。现有部署不自动跟随 main 更新。
+
 ## 快速定位
 
 - 首次部署：`QUICKSTART.md`。

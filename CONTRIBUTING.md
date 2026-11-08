@@ -31,6 +31,14 @@ python scripts/smoke_test.py
 
 自动测试结果见仓库的 [GitHub Actions](https://github.com/BiteTheDDDDt/LysBot/actions)。AI 操作规范见根目录 `AGENTS.md`。
 
+## 发行版
+
+正式 Release 是普通用户默认部署和升级的版本，main 用于持续开发。版本使用 `v主版本.次版本.修订号` tag，与 `pyproject.toml` 保持一致；0.x 阶段仍可能调整配置与扩展接口，变化须在发行说明中交代。需要提前测试的版本标为 prerelease，不作为默认部署目标。
+
+发布前确认目标提交的 Linux／Windows、Python 3.11／3.13 CI 全部通过，完成发布检查及相关功能验证。tag 固定到该提交，发布后不移动 tag；修复另发版本。发行说明写清功能、已知限制、升级所需操作和 QUICKSTART 入口。首版使用 v0.1.0，后续版本根据改动递增。
+
+发行版交付所选 tag 的源码，继续使用仓库 Dockerfile 和 Compose 构建部署，不要求上传运行数据、私人配置或额外制作二进制包。
+
 ## 开发与评估脚本
 
 | 脚本 | 使用场景 |

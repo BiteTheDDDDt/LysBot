@@ -17,13 +17,16 @@ LysBot 是一个有长期记忆、能查资料、会接梗的 QQ 群友，默认
 
 ## 2. 快速开始
 
+日常部署和升级使用 [最新正式发行版](https://github.com/BiteTheDDDDt/LysBot/releases/latest)，`main` 用于持续开发。发行版同样由 AI 使用 Docker Compose 构建并部署。
+
 ### 如果你是人类
 
 把下面这段话发给能操作电脑或服务器的 **Codex / Claude Code** 等 AI 助手：
 
 ```text
 帮我部署并运行 LysBot：https://github.com/BiteTheDDDDt/LysBot
-按仓库 AGENTS.md 的指引完成部署，最后验证 bot 能在 QQ 中实际回复消息。
+选择最新正式 Release，固定到对应 tag，按该版本的 AGENTS.md 完成部署，
+最后验证 bot 能在 QQ 中实际回复消息，并告诉我部署的版本号。
 ```
 
 准备好：
@@ -62,6 +65,13 @@ LysBot 有哪些可以白嫖的 provider？请结合仓库推荐和当前免费�
 ```text
 我想给 LysBot 设置个性化人设：[角色、性格、说话风格、称呼习惯]。
 请帮我配置并启用这个人设。
+```
+
+**升级版本**
+
+```text
+帮我把 LysBot 升级到最新正式 Release。先阅读发行说明，保留配置、人设、
+插件和数据，准备备份及回退镜像，完成升级后验证 QQ 回复并报告版本号。
 ```
 
 想手动修改也可以看 [.env.example](.env.example) 和 [多模型组合示例](.env.models.example)。详细说明：[配置手册](docs/configuration.md) · [Provider 与费用](docs/providers.md) · [QQ 使用手册](docs/commands.md) · [插件扩展](docs/extensions.md)。
