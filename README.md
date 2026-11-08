@@ -88,6 +88,6 @@ LysBot/
 └── compose*.yaml            # Bot、NapCat 与可选模型网关
 ```
 
-开发见 [贡献指南](CONTRIBUTING.md)，已有部署切换见 [迁移说明](docs/migration.md)。聊天会记录在本地，并按配置发送到模型服务，请向群友说明。
+开发见 [贡献指南](CONTRIBUTING.md)。聊天会记录在本地，并按配置发送到模型服务，请向群友说明。
 
 代码采用 [Apache License 2.0](LICENSE)；角色与头图相关权益见 [素材说明](assets/README.md)。
