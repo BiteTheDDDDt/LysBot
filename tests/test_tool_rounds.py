@@ -514,7 +514,7 @@ class MediaAuthorizationTests(unittest.IsolatedAsyncioTestCase):
                     names = {t["function"]["name"] for t in requests[1]["tools"]}
                     self.assertEqual(names & MEDIA_TOOLS, {name})
                     self.assertFalse(names & READ_TOOLS)
-                    self.assertGreaterEqual(run.deadline - run.started_at, config.chat_media_turn_timeout)
+                    self.assertGreaterEqual(run.deadline, run.started_at + config.chat_media_turn_timeout)
                     self.assertIsNone(run.authorized_media_tool)
                 finally:
                     current_run.reset(token)

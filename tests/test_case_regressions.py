@@ -58,8 +58,8 @@ class CaseRegressions(unittest.IsolatedAsyncioTestCase):
         execute.assert_awaited_once()
         self.assertIn("generate_image", {tool["function"]["name"] for tool in create.await_args.kwargs["tools"]})
         self.assertEqual(list(response.agent_run.actions.values())[0]["status"], "sent")
-        self.assertGreaterEqual(response.agent_run.deadline - response.agent_run.started_at,
-                                config.chat_media_turn_timeout)
+        self.assertGreaterEqual(response.agent_run.deadline,
+                                response.agent_run.started_at + config.chat_media_turn_timeout)
         self.assertIsNone(response.agent_run.authorized_media_tool)
 
     async def test_media_context_does_not_authorize_an_unplanned_media_tool(self):
