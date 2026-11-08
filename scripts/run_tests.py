@@ -9,6 +9,11 @@ import tempfile
 
 
 def main() -> int:
+    # The parent process also prints UTF-8 child logs on Windows failure paths.
+    # Setting PYTHONUTF8 only in the child's environment leaves the parent on
+    # cp1252 and can hide the actual test failure with UnicodeEncodeError.
+    sys.stdout.reconfigure(encoding="utf-8", errors="backslashreplace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="backslashreplace")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("-p", "--pattern", default="test*.py")
     args = parser.parse_args()
