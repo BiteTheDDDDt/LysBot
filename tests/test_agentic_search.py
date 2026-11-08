@@ -260,8 +260,10 @@ class SearchStorageTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_semantic_timeout_gives_lexical_fallback_a_fresh_bounded_budget(self):
         connection = self.search._connect
-        clock = [time.monotonic()]
-        fallback_budgets = []
+        # Cross a float exponent boundary when refreshing the SQL deadline.
+        # Use the same fake clock for retrieval and SQLite progress checks.
+        clock = [1015.8]
+        fallback_deadlines = []
         vector_failed = False
 
         def interrupted_vectors(*, vectors=False, deadline=None):
@@ -271,12 +273,13 @@ class SearchStorageTests(unittest.IsolatedAsyncioTestCase):
                 vector_failed = True
                 raise sqlite3.OperationalError("interrupted")
             if vector_failed and deadline is not None:
-                fallback_budgets.append(deadline - clock[0])
+                fallback_deadlines.append((clock[0], deadline))
             return connection(vectors=vectors, deadline=deadline)
 
         vector = struct.pack("<512f", 1, *([0] * 511))
         with (
             patch("src.plugins.llm_chat.retrieval.time", SimpleNamespace(monotonic=lambda: clock[0])),
+            patch("src.plugins.llm_chat.memory_index.time", SimpleNamespace(monotonic=lambda: clock[0], time=time.time)),
             patch.object(self.search, "_connect", side_effect=interrupted_vectors),
             patch("src.plugins.llm_chat.retrieval.embed", AsyncMock(return_value=[vector])),
         ):
@@ -284,8 +287,11 @@ class SearchStorageTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("vector_query_budget_exhausted", found["warnings"])
         self.assertEqual(found["effective_mode"], "keyword")
         self.assertTrue(found["items"])
-        self.assertTrue(fallback_budgets)
-        self.assertTrue(all(0 < budget <= 8 for budget in fallback_budgets))
+        self.assertTrue(fallback_deadlines)
+        for started, deadline in fallback_deadlines:
+            # Compare absolute deadlines: subtracting float timestamps can
+            # turn an exact eight-second budget into 8.000000000000114.
+            self.assertEqual(deadline, started + 8)
 
     async def test_source_change_during_embedding_requires_a_fresh_search(self):
         async def embedding_with_concurrent_write(*args, **kwargs):
