@@ -11,6 +11,8 @@ __pycache__/
 bot.stderr.log
 bot.stdout.log
 data/
+knowledge/**
+!knowledge/project.md
 notes.txt
 tests/
 .tmp/

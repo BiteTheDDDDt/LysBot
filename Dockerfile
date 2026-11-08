@@ -18,6 +18,7 @@ COPY pyproject.toml README.md LICENSE NOTICE AGENTS.md QUICKSTART.md CONTRIBUTIN
 COPY src ./src
 COPY lysbot ./lysbot
 COPY personas ./personas
+COPY knowledge/project.md ./knowledge/project.md
 COPY scripts ./scripts
 COPY docs ./docs
 COPY extensions/.gitkeep ./extensions/.gitkeep

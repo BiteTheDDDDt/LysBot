@@ -58,6 +58,31 @@ docker compose exec bot python scripts/agentic_search_ops.py status --database /
 
 实际数据库在其他位置时替换参数。在运行库所在的系统内执行查询与 SQLite backup，避免跨 Windows/Linux 同时打开一个 WAL 数据库。
 
+## 静态知识库
+
+动态知识库来自实际群聊、摘要与记忆，使用 `recall_history/read_history/query_history` 检索。静态知识库由部署者预设，使用 `search_knowledge/read_knowledge` 检索；两者并列，按问题需要结合，不互相覆盖。
+
+默认从 `knowledge/` 读取 UTF-8 Markdown／文本文件，包含 LysBot 项目信息。可让 AI 在 `knowledge/local/` 添加领域资料、术语或 skill，例如：
+
+```text
+knowledge/
+├── project.md
+└── local/
+    ├── 游戏攻略.md
+    └── skills/
+        └── 排查问题.md
+```
+
+文件用 `# 标题` 开头，正文说明适用范围、事实或步骤即可，不要求特殊元数据格式。skill 是可检索的方法资料，不会注册新工具、执行脚本或授予管理员权限。默认忽略自定义资料，不提交 Git；内置 `project.md` 仍受版本控制。
+
+Compose 已把 `./knowledge` 只读挂载到 `/app/knowledge`。本地 Python 默认读取当前工作目录的 `knowledge`。可用 `KNOWLEDGE_DIR` 指定容器内／进程内的目录；使用自有宿主目录时，由 AI 修改 bot 的 Compose 挂载源并保留只读模式。设置 `KNOWLEDGE_DIR=` 可同时关闭两个静态知识工具。
+
+**此目录中的资料会向所有群和私聊开放，并可能发送到配置的模型服务。** 不放 `.env`、账号资料、聊天备份或仅供某个群访问的内容；这类内容不属于共享静态知识库。工具拒绝隐藏文件、目录穿越、符号链接与目录联接，不接受模型传入任意系统路径。
+
+搜索采用本地关键词，不调用 embedding 或联网服务。空查询可分页浏览目录；搜索返回标题、片段和带内容版本的 `document_id`。读取正文时用该 ID，长文按 `next_offset` 继续。文件修改后下一次搜索生效，无需重建索引；旧 ID 会返回版本变化并要求重新搜索，跨轮使用的静态来源也会回读校验。
+
+每次最多扫描 4096 个目录项、512 篇文档和 8 MiB 文本，单文件上限 256 KiB；搜索每页最多 20 条、读取每页最多 6000 字符。超限、文件不可读或无效编码会返回 partial／warning，不把扫描不完整当作没有资料。适合项目说明和小型知识集，大批资料可先按主题整理。
+
 ## 命令
 
 完整命令、别名、参数、权限及作用范围见 [QQ 使用手册](commands.md)。

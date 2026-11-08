@@ -256,6 +256,12 @@ class AgentRunner:
                 ):
                     continue
                 item = {**item, "excerpt": fresh.get("excerpt", "")[:500]}
+            elif key.startswith("k:"):
+                from .knowledge import refresh_evidence
+                fresh = await asyncio.to_thread(refresh_evidence, {**item, "id": key})
+                if fresh is None:
+                    continue
+                item = fresh
             elif key.startswith("w:"):
                 source = self.sources.get(key, {})
                 if time.time() - source.get("created_at", 0) > 3600:

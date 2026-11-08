@@ -1204,4 +1204,18 @@ async def revise_memory(action, ref="", content=None, owner_id=None, assertion=N
 
 
 # Bind only after all implementations have been defined.
+async def search_knowledge(query="", limit=8, offset=0):
+    from .knowledge import KnowledgeStore
+    from .config import config
+    result = await asyncio.to_thread(KnowledgeStore(config.knowledge_dir).search, query, limit, offset)
+    return json.dumps(result, ensure_ascii=False, separators=(",", ":"))
+
+
+async def read_knowledge(document_id, offset=0, max_chars=4000):
+    from .knowledge import KnowledgeStore
+    from .config import config
+    result = await asyncio.to_thread(KnowledgeStore(config.knowledge_dir).read, document_id, offset, max_chars)
+    return json.dumps(result, ensure_ascii=False, separators=(",", ":"))
+
+
 TOOL_FUNCTIONS = bind_handlers(globals())

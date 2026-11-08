@@ -57,3 +57,4 @@ packages = ["src", "lysbot"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "personas" = "personas"
+"knowledge/project.md" = "knowledge/project.md"

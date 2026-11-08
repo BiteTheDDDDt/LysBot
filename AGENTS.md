@@ -15,6 +15,7 @@ LysBot 对 AI 友好：部署、运维和开发由 AI 通过仓库文档与稳�
 - 模型、人设、命令：`docs/configuration.md`。
 - QQ 命令与权限：`docs/commands.md`；实际多模型组合：`.env.models.example`（仅路由，不含凭据）。
 - 扩展 API：`lysbot/`，说明在 `docs/extensions.md`。
+- 静态知识：`knowledge/`，与动态群聊检索并列；配置与边界见 `docs/configuration.md` 的静态知识库章节。
 - 脚本用途与数据影响：`docs/ai-operations.md`；开发评估入口见 `CONTRIBUTING.md`。一次性交付记录、素材生成提示词和临时排障脚本不提交仓库。
 - bot 入口：`bot.py`，身份与环境初始化在 `src/bootstrap.py`。
 - 群聊与记忆核心：`src/plugins/llm_chat/`。

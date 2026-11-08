@@ -83,6 +83,15 @@ async def restore_context(run):
                                         "related_sources": [{"id": key, "url": available[key].get("url")} for key in refs],
                                     } if native_answer else {})})
                 continue
+            if ref.startswith("k:"):
+                from .knowledge import refresh_evidence
+                if ref not in checked:
+                    fresh = await asyncio.to_thread(refresh_evidence, {**old, "id": ref})
+                    checked[ref] = ({**fresh, "context_origin_at": old.get("context_origin_at", updated)}
+                                    if fresh else None)
+                if checked[ref]:
+                    sources.append({"id": ref, "kind": "knowledge", "excerpt": checked[ref]["excerpt"][:900]})
+                continue
             if not ref.startswith("h:"):
                 continue
             if ref not in checked:
@@ -102,7 +111,7 @@ async def restore_context(run):
         attempts = [
             call.get("function", {}) for message in state.get("transcript", [])
             for call in message.get("tool_calls", [])
-            if call.get("function", {}).get("name") in {"recall_history", "query_history", "search_web"}
+            if call.get("function", {}).get("name") in {"recall_history", "query_history", "search_web", "search_knowledge"}
         ][-3:]
         note = {
             "run_id": rid, "question": state.get("user_question", "")[:600],

@@ -12,6 +12,9 @@ logs/
 # Private local plugins
 extensions/*
 !extensions/.gitkeep
+# Deployment-specific static knowledge stays private; ship only project facts.
+knowledge/*
+!knowledge/project.md
 # Development artifacts
 __pycache__/
 *.py[cod]

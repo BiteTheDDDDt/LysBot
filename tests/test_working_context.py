@@ -129,6 +129,30 @@ class WorkingContextTests(unittest.IsolatedAsyncioTestCase):
         r.requester_id = 101
         return r
 
+    async def test_static_evidence_is_revalidated_and_removed_after_file_changes(self):
+        from src.plugins.llm_chat.knowledge import KnowledgeStore
+        root = Path(self.tmp.name) / "knowledge"
+        root.mkdir()
+        path = root / "project.md"
+        path.write_text("# 项目信息\n静态来源", encoding="utf-8")
+        store = KnowledgeStore(root)
+        doc = store.search()["items"][0]["document_id"]
+        item = store.read(doc)["items"][0]
+        state = {"requester_id": 101, "evidence": {item["id"]: item}, "actions": {}}
+        await self.db.execute("INSERT INTO agent_runs VALUES(?,?,?,?,?,?)", (
+            "static-previous", "group_7", 0, "complete", json.dumps(state), time.time(),
+        ))
+        await self.db.commit()
+        with patch.object(config, "knowledge_dir", str(root)):
+            run = self.runner()
+            await restore_context(run)
+            self.assertIn(item["id"], run.evidence)
+            self.assertEqual(run.evidence[item["id"]]["provenance"], "static_knowledge")
+            path.write_text("# 已更新\n新版本资料", encoding="utf-8")
+            run = self.runner()
+            await restore_context(run)
+            self.assertNotIn(item["id"], run.evidence)
+
     async def test_plain_followup_restores_checked_evidence_without_replaying_actions(self):
         await self.save()
         with patch.object(agent_runner, "_runtime_path", self.manager._db_path):

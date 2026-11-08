@@ -29,6 +29,7 @@ async def exercise(root, directory, model_port, requests):
                    if not key.startswith(("MODEL_", "ROLE_", "PROVIDER_PROXY_"))}
     environment.update(
         PERSONA_FILE="personas/phosphophyllite.toml",
+        KNOWLEDGE_DIR="knowledge",
         HTTP_PROXY="", HTTPS_PROXY="", ALL_PROXY="", NO_PROXY="127.0.0.1,localhost",
         MASTER_QQ="42", ACCESS_TOKEN="smoke-token", HOST="127.0.0.1", PORT=str(port),
         MODEL_GENERAL="openai:smoke-general", OPENAI_API_KEY="smoke-not-a-real-key",
@@ -44,6 +45,8 @@ async def exercise(root, directory, model_port, requests):
     checkout.mkdir()
     for name in ("src", "lysbot", "personas"):
         shutil.copytree(root / name, checkout / name, ignore=shutil.ignore_patterns("__pycache__"))
+    (checkout / "knowledge").mkdir()
+    shutil.copy2(root / "knowledge/project.md", checkout / "knowledge/project.md")
     for name in ("bot.py", "pyproject.toml"):
         shutil.copy2(root / name, checkout / name)
     extension_dir = checkout / "extensions"
