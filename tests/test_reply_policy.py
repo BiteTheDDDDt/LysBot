@@ -32,6 +32,7 @@ class ReplyPolicyTests(unittest.TestCase):
             self.assertTrue(policy.tiny)
             self.assertEqual(policy.max_text_parts, 1)
             self.assertIn("1—5字", policy.system_hint())
+            self.assertIn("不带标点符号", policy.system_hint())
             self.assertEqual(enforce_reply_budget("这句完整的话不会因为极短模式被截断。", policy),
                              "这句完整的话不会因为极短模式被截断")
         self.assertEqual(unpack_plan('{"response_mode":"social","verify_group_identity":false,"content":"接梗","reply_mode":"tiny"}')["reply_mode"], "tiny")
