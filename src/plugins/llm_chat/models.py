@@ -792,13 +792,14 @@ class ModelManager:
         await runner.checkpoint()
         await runner.validate_scope()
         if runner.reply_policy and runner.reply_policy.scene == "proactive" and not runner.should_reply:
+            general_logger.info("[主动发言] 执行规划决定放弃本轮参与，未发送消息")
             return ChatResponse("", usage=getattr(plan, "usage", None))
         from dataclasses import replace
         # The execution planner has the latest context and can shorten or expand
         # ordinary replies. An earlier participation decision is only provisional.
         policy = runner.reply_policy
-        if policy and policy.scene in {"chat", "multiuser"} and not required_tool and runner.reply_mode:
-            runner.reply_policy = replace(policy, detailed=runner.reply_mode == "detailed")
+        if policy and policy.scene in {"chat", "multiuser", "close", "proactive", "poke"} and not required_tool and runner.reply_mode:
+            runner.reply_policy = replace(policy, detailed=runner.reply_mode == "detailed" and policy.scene in {"chat", "multiuser"}, tiny=runner.reply_mode == "tiny")
         draft = str(plan) if runner.identity_verdict else runner.answer_draft
         if runner.response_mode == "factual" and draft and not is_tool_call_text(draft):
             runner.render_fallback = _attach_response_context(

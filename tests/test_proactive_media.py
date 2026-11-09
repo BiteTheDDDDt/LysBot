@@ -28,7 +28,7 @@ class ProactiveMediaTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(manager.is_on_cooldown(99), sent)
             bot.send_group_msg.assert_not_awaited()
 
-    async def test_planner_withdrawal_does_not_retry(self):
+    async def test_planner_skipping_participation_does_not_retry(self):
         from src.plugins.llm_chat.models import ChatResponse
         manager = proactive.ProactiveManager()
         response = ChatResponse('')

@@ -22,6 +22,20 @@ from src.plugins.llm_chat.utils import clean_response
 
 
 class ReplyPolicyTests(unittest.TestCase):
+    def test_tiny_mode_survives_planning_and_does_not_cut_output(self):
+        from src.plugins.llm_chat.planner import _normalize_decision
+        from src.plugins.llm_chat.conversation_style import unpack_plan
+        decision = _normalize_decision({"action": "reply", "reply_mode": "tiny"}, "reply")
+        self.assertEqual(decision.reply_mode, "tiny")
+        for scene in ("chat", "proactive", "poke"):
+            policy = select_reply_policy([], decision=decision, scene=scene)
+            self.assertTrue(policy.tiny)
+            self.assertEqual(policy.max_text_parts, 1)
+            self.assertIn("1—5字", policy.system_hint())
+            self.assertEqual(enforce_reply_budget("这句完整的话不会因为极短模式被截断。", policy),
+                             "这句完整的话不会因为极短模式被截断")
+        self.assertEqual(unpack_plan('{"response_mode":"social","verify_group_identity":false,"content":"接梗","reply_mode":"tiny"}')["reply_mode"], "tiny")
+
     def test_short_reply_keeps_qualifying_sentence(self):
         self.assertEqual(enforce_reply_budget("第二赛段已经开播。但不是所有集数都上线了。"),
                          "第二赛段已经开播。但不是所有集数都上线了")

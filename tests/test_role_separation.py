@@ -96,7 +96,7 @@ class RoleSeparationTests(unittest.IsolatedAsyncioTestCase):
             error.body = {"error": {"code": code, "reset_seconds": delay}}
             self.assertEqual(models._quota_reset_delay(error), 0)
 
-    async def test_proactive_can_withdraw_but_direct_question_still_renders(self):
+    async def test_proactive_can_skip_participation_but_direct_question_still_renders(self):
         from src.plugins.llm_chat.agent_runner import current_run
         from src.plugins.llm_chat.conversation_style import unpack_plan
         from src.plugins.llm_chat.reply_policy import PROACTIVE_REPLY, SHORT_REPLY

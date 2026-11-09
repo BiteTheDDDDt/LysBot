@@ -8,7 +8,8 @@ if TYPE_CHECKING:
     from .planner import PlannerDecision
 
 
-REPLY_MODE_GUIDANCE = """reply_mode 为 sentence（简短，默认）或 detailed（展开），按用户本轮实际需要选择，可修正前面的参与规划。
+REPLY_MODE_GUIDANCE = """reply_mode 为 tiny（极短反应）、sentence（简短，默认）或 detailed（展开），按用户本轮实际需要选择，可修正前面的参与规划。
+惊讶、接梗、轻微吐槽、确认或收尾，只需一个反应时选 tiny：倾向1—5字，一条短句，说完就停，不补解释；避免无意义地高频附和。
 日常接梗、感想、确认、简单事实问答和局部追问选 sentence：通常10—30字，一个接话点，一两句自然短话即可。不要把一句调侃发展成连续比喻、分析、建议和总结。
 用户需要调查、比较、介绍、操作步骤或深入解释，确实需要展开时选 detailed；问“为什么”不自动意味着长文，能简短解释就简短。检索多、输入长、之前回答长不意味着这轮也要长。
 详细回复按信息需要组织，尽量在500个字符内，复杂调查可超过；简单答案不凑篇幅。追问只补本轮缺口，不重讲背景。消息条数与篇幅独立，按 parts 决定，最多两条；分条不增加总篇幅。"""
@@ -18,6 +19,7 @@ REPLY_MODE_GUIDANCE = """reply_mode 为 sentence（简短，默认）或 detaile
 class ReplyPolicy:
     scene: str = "chat"
     detailed: bool = False
+    tiny: bool = False
 
     @property
     def max_chars(self) -> int:
@@ -25,10 +27,12 @@ class ReplyPolicy:
 
     @property
     def max_text_parts(self) -> int:
-        return 2
+        return 1 if self.tiny else 2
 
     def system_hint(self) -> str:
-        if self.detailed:
+        if self.tiny:
+            length_rule = "本轮为极短反应，倾向1—5字，只发一条短句或语气词，说完就停，不补解释、认错总结或第二个笑点。没有合适反应不硬附和。这是生成偏好，不裁剪完整输出。"
+        elif self.detailed:
             length_rule = (
                 f"本轮允许展开，可以分段或列步骤；无最低字数，尽量控制在{self.max_chars}个字符内，复杂调查按需展开，必要事实和来源不因字数省略。"
                 "按问题需要讲清楚即可，篇幅不是目标，不凑字数。"
@@ -43,7 +47,7 @@ class ReplyPolicy:
                 "简短解释保留结论和关键原因即可；必要条件、纠错和来源可适当超出，不为字数删掉关键含义。"
             )
         return (
-            f"【本轮回复规则：{self.scene} / {'详细' if self.detailed else '简短'}】\n"
+            f"【本轮回复规则：{self.scene} / {'极短' if self.tiny else '详细' if self.detailed else '简短'}】\n"
             + length_rule
             + "这些篇幅建议用于生成时组织内容，不是发送截断上限；保留完整结论、必要条件和来源链接。\n"
             "人设只影响表达，不得改变规划中确认的事实、关键条件和回应意图。"
@@ -73,14 +77,14 @@ def select_reply_policy(
     decision: Optional["PlannerDecision"] = None,
 ) -> ReplyPolicy:
     if scene in {"proactive", "poke", "media_followup"}:
-        return ReplyPolicy(scene=scene)
+        return ReplyPolicy(scene=scene, tiny=bool(decision and decision.reply_mode == "tiny"))
     if decision and decision.required_tool:
         return MEDIA_REPLY
     if decision and decision.action == "close":
-        return ReplyPolicy(scene="close")
+        return ReplyPolicy(scene="close", tiny=bool(decision and decision.reply_mode == "tiny"))
     if decision and decision.action == "poke":
-        return POKE_REPLY
-    return ReplyPolicy(scene=scene, detailed=bool(decision and decision.reply_mode == "detailed"))
+        return replace(POKE_REPLY, tiny=decision.reply_mode == "tiny")
+    return ReplyPolicy(scene=scene, detailed=bool(decision and decision.reply_mode == "detailed"), tiny=bool(decision and decision.reply_mode == "tiny"))
 
 
 def constrain_plan(
