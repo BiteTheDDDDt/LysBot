@@ -167,7 +167,7 @@ class BriefingDeliveryTests(unittest.IsolatedAsyncioTestCase):
                 patch.object(briefing.memory_manager, "get_digest_messages", AsyncMock(return_value=([msg], 1000))),
                 patch.object(briefing.model_manager, "chat", AsyncMock(return_value=json.dumps({
                     "topics": ["显卡评测"], "portrait_prompt": "群友围着显卡讨论",
-                    "active_members": [{"user_id": 42, "model_archetype": "GPT型", "comment": "结论不算数，跑过再签字。", "source_ids": [101]}],
+                    "active_members": [{"user_id": 42, "personality_tag": "原文质检员", "comment": "结论不算数，跑过再签字。", "source_ids": [101]}],
                 }, ensure_ascii=False))) as model,
                 patch.object(briefing.usage_db, "query_session", AsyncMock(return_value={})) as usage,
                 patch.object(briefing, "generate_image", generator),
@@ -179,12 +179,12 @@ class BriefingDeliveryTests(unittest.IsolatedAsyncioTestCase):
                 prompt = model.await_args.args[0][-1].content
                 self.assertIn("#101", prompt)
                 self.assertIn("user_id=42", prompt)
-                self.assertIn("今日模型人格", prompt)
+                self.assertIn("今日群友画像", prompt)
                 self.assertIn("本人正文", prompt)
-                self.assertIn("豆包·迷糊豆姐", prompt)
-                self.assertIn("DeepSeek·大肥鱼", prompt)
-                self.assertIn("不能因为提问就判笨", prompt)
-                self.assertIn("不按他提到了哪个模型分配", prompt)
+                self.assertIn("动态创造一个简短鲜明的人格标签", prompt)
+                self.assertNotIn("DeepSeek·大肥鱼", prompt)
+                self.assertIn("不诊断永久性格", prompt)
+                self.assertIn("不限类别", prompt)
                 saved_card = record.await_args.args[1]
                 self.assertEqual(saved_card["active_members"][0]["name"], "群友甲")
                 self.assertEqual(saved_card["active_members"][0]["source_ids"], [101])

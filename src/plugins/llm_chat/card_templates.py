@@ -25,8 +25,9 @@ def briefing_member_section(data):
         if isinstance(item, str):
             entries.append(item)
         elif isinstance(item, dict):
-            entries.append(f"{item['name']} · {item['model_archetype']}\n{item['comment']}")
-    return ("活跃选手" if legacy else "今日模型人格"), entries or ["今日席位暂空"]
+            tag = item.get("personality_tag", item.get("model_archetype", ""))
+            entries.append(f"{item['name']} · {tag}\n{item['comment']}")
+    return ("活跃选手" if legacy else "今日群友画像"), entries or ["今日席位暂空"]
 
 
 def _usage_missing_note(row):

@@ -28,7 +28,7 @@ class BriefingPersonaTests(unittest.TestCase):
         ]
 
     def entry(self, **overrides):
-        return {"user_id": 101, "model_archetype": "GPT型", "comment": "每个结论都要亲手核对一遍。",
+        return {"user_id": 101, "personality_tag": "原文质检员", "comment": "每个结论都要亲手核对一遍。",
                 "source_ids": [11], **overrides}
 
     def parse(self, entries):
@@ -37,10 +37,17 @@ class BriefingPersonaTests(unittest.TestCase):
             source_messages=self.sources,
         )
 
+    def test_old_model_cards_remain_readable(self):
+        entry = self.entry()
+        entry["model_archetype"] = entry.pop("personality_tag")
+        card = self.parse([entry])
+        self.assertEqual(card["active_members"][0]["personality_tag"], "原文质检员")
+        self.assertIn("原文质检员", briefing.build_briefing_text(card))
+
     def test_member_name_comes_from_account_in_window_and_account_is_not_repeated(self):
         card = self.parse([
             self.entry(name="伪造的昵称", source_ids=[11, 12, 11]),
-            self.entry(model_archetype="另一个类型"),
+            self.entry(personality_tag="另一个类型"),
             self.entry(user_id=202, source_ids=[13]),
         ])
         members = card["active_members"]
@@ -61,7 +68,7 @@ class BriefingPersonaTests(unittest.TestCase):
         self.assertEqual(briefing._member_own_text(self.sources[-1]), "这个结论我算过，有误")
 
     def test_malformed_members_do_not_discard_the_rest_of_the_briefing(self):
-        for entries in ({"user_id": 101}, None, [None, 42, self.entry(comment=None), self.entry(model_archetype=[])]):
+        for entries in ({"user_id": 101}, None, [None, 42, self.entry(comment=None), self.entry(personality_tag=[])]):
             with self.subTest(entries=entries):
                 card = self.parse(entries)
                 self.assertEqual(card["topics"], ["今天的讨论"])
@@ -72,7 +79,7 @@ class BriefingPersonaTests(unittest.TestCase):
         text = briefing.build_briefing_text(card)
         self.assertIn("活跃选手", text)
         self.assertIn("群友甲：旧版人物点评", text)
-        self.assertNotIn("今日模型人格", text)
+        self.assertNotIn("今日群友画像", text)
 
     def test_current_generation_cannot_bypass_sources_with_legacy_strings_or_plain_text(self):
         self.assertEqual(self.parse(["群友甲：旧版人物点评"])["active_members"], [])
@@ -88,17 +95,17 @@ class BriefingPersonaTests(unittest.TestCase):
         card = self.parse([self.entry(user_id=100 + i, source_ids=[200 + i]) for i in range(6)])
         self.assertEqual(len(card["active_members"]), briefing.MEMBER_LIMIT)
         document = build_card("briefing", card, group_name="群", group_id=7, date_label="2026-10-22")
-        block = next(block for block in document.blocks if block.heading == "今日模型人格")
+        block = next(block for block in document.blocks if block.heading == "今日群友画像")
         self.assertEqual(len(block.entries), 5)
         text = briefing.build_briefing_text(card)
         for entry in block.entries:
             self.assertIn(entry, text)
-        self.assertIn("成员4 · GPT型", text)
+        self.assertIn("成员4 · 原文质检员", text)
         for absent in ("成员5", "source_ids", "user_id", "仅供娱乐"):
             self.assertNotIn(absent, text)
 
     def test_portrait_uses_actual_scene_not_model_personality_analogy(self):
-        card = self.parse([self.entry(model_archetype="豆包型", comment="今日脑袋像一只烧糊的包子。")])
+        card = self.parse([self.entry(personality_tag="迷糊包子", comment="今日脑袋像一只烧糊的包子。")])
         card["portrait_prompt"] = "群友拿着核对清单检查缓存故障。"
         prompt = briefing.build_portrait_prompt(card)
         self.assertIn("核对清单", prompt)
