@@ -76,17 +76,18 @@ class BriefingRenderTests(unittest.TestCase):
             x, y = (i % 2) * 100, (i // 2) * 100
             draw.rectangle((x, y, x + 99, y + 99), fill=color)
         members = [{"name": f"群友{i}", "personality_tag": "原文质检员", "comment": "亲自核对了原文", "source_ids": [i]} for i in range(4)]
-        with briefing.compose_member_portraits(atlas, members) as grid:
-            for i, color in enumerate(colors):
-                from PIL import ImageColor
-                self.assertEqual(grid.getpixel(((i % 2) * 452 + 10, (i // 2) * 662 + 10)), ImageColor.getrgb(color))
-            from src.plugins.llm_chat.card_templates import build_card
-            doc = build_card("briefing", {"active_members": members, "summary": "不应显示"},
-                             group_name="测试", group_id=1, date_label="今天", member_portraits=grid)
-            self.assertNotIn("群聊收尾", [b.heading for b in doc.blocks])
-            block = next(b for b in doc.blocks if b.heading == "今日群友画像")
-            self.assertIs(block.image, grid)
-            self.assertEqual(block.entries, [])
+        from src.plugins.llm_chat.card_templates import build_card
+        doc = build_card("briefing", {"active_members": members, "summary": "不应显示"},
+                         group_name="测试", group_id=1, date_label="今天", member_portraits=atlas)
+        self.assertNotIn("群聊收尾", [b.heading for b in doc.blocks])
+        block = next(b for b in doc.blocks if b.heading == "今日群友画像")
+        self.assertIs(block.image, atlas)
+        self.assertEqual(block.entries, [])
+        prompt = briefing.build_member_portrait_prompt({"active_members": members})
+        self.assertIn("特质", prompt)
+        for member in members:
+            self.assertIn(member["name"], prompt)
+            self.assertIn(member["comment"], prompt)
         self.assertNotIn("群聊收尾", briefing.build_briefing_text({"summary": "不应显示"}))
         atlas.close()
 
@@ -205,7 +206,7 @@ class BriefingDeliveryTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("本人正文", prompt)
                 self.assertIn("动态创造一个简短鲜明的人格标签", prompt)
                 self.assertNotIn("DeepSeek·大肥鱼", prompt)
-                self.assertIn("不诊断永久性格", prompt)
+                self.assertIn("不把有限观察写成永久性格诊断", prompt)
                 self.assertIn("不限类别", prompt)
                 saved_card = record.await_args.args[1]
                 self.assertEqual(saved_card["active_members"][0]["name"], "群友甲")

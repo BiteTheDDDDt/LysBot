@@ -11,7 +11,7 @@ from pathlib import Path
 
 from nonebot import logger, get_bots
 from nonebot import require
-from PIL import Image, ImageDraw, ImageOps
+from PIL import Image
 
 # 引入定时任务
 require("nonebot_plugin_apscheduler")
@@ -39,12 +39,12 @@ BRIEFING_MAX_ATTEMPTS = 3
 BRIEFING_RETRY_MINUTES = 30
 
 DAILY_PERSONALITY_GUIDE = """【今日群友画像】
-先观察本人当天如何说话、接梗、回应别人和处理问题，再动态创造一个简短鲜明的人格标签，personality_tag 使用这个标签。
+以本人聊天资料为依据，提炼这个人鲜明的特质、气质或性格反差，再动态创造一个简短鲜明的人格标签，personality_tag 使用这个标签。
 标签像群友会起的外号，倾向4—10字；可抓反差、习惯或名场面，不限类别，不要求模型名、MBTI或固定角色映射。
 每人只选一个最贴切的标签，同一天避免相近标签重复；不要为了区别而生造行为。选有特点的人，不只看谁发言最多。
-短评结合当天具体行为解释为什么是这个标签，让人能认出来；不要重新罗列讨论话题、解释标签定义或堆抽象夸奖。
+短评突出这个人的特质，并用具体言行支撑，让人能认出来；不要重新罗列讨论话题、解释标签定义或堆抽象夸奖。
 可幽默、互损、抓糗点或反差，轻重以本人实际发言为依据，不用所有人都夸，不照抄固定句式。
-只评当天表现，不诊断永久性格；标签中的夸张比喻不代表真实事件，不添加娱乐免责声明。
+依据本批材料描写人物特质，不把有限观察写成永久性格诊断；标签中的夸张比喻不代表真实事件，不添加娱乐免责声明。
 """
 
 
@@ -409,41 +409,20 @@ async def generate_briefing_portrait(card_data: dict, group_id: int) -> Image.Im
         return None
 
 
-def compose_member_portraits(atlas: Image.Image, members: list[dict]) -> Image.Image:
-    """Lay out four generated panels and deterministic Chinese captions."""
-    side, gap, caption = 428, 24, 210
-    canvas = Image.new("RGB", (side * 2 + gap, (side + caption) * 2 + gap), "#f5faf7")
-    draw = ImageDraw.Draw(canvas)
-    for index, member in enumerate(members[:4]):
-        col, row = index % 2, index // 2
-        bounds = (col * atlas.width // 2, row * atlas.height // 2,
-                  (col + 1) * atlas.width // 2, (row + 1) * atlas.height // 2)
-        x, y = col * (side + gap), row * (side + caption + gap)
-        with atlas.crop(bounds) as panel:
-            with ImageOps.fit(panel, (side, side)) as fitted:
-                canvas.paste(fitted, (x, y))
-        text_y = y + side + 12
-        for text, size, bold in ((member.get("name", ""), 25, True),
-                                  (member.get("personality_tag", member.get("model_archetype", "")), 23, True),
-                                  (member.get("comment", ""), 20, False)):
-            font = _get_font(size, bold)
-            for line in wrap_text_pixel(str(text), font, side - 20, draw):
-                draw.text((x + 10, text_y), line, font=font, fill="#263f3b")
-                text_y += size + 7
-    return canvas
-
-
 def build_member_portrait_prompt(card_data: dict) -> str:
     members = [m for m in card_data.get("active_members", []) if isinstance(m, dict)][:4]
     if not members:
         raise ValueError("no_member_portrait_material")
-    scenes = [{"格": i + 1, "标签": m.get("personality_tag", m.get("model_archetype", "")),
-               "当天表现": m["comment"]} for i, m in enumerate(members)]
-    prompt = ("画一张正方形2×2四格人物插画，严格等宽等高无间隙，按左上、右上、左下、右下顺序。"
-              "每格只画对应的一位虚构成年群友，以当天表现设计动作、道具和小场景；不是现实肖像。"
-              "四格使用统一的宝石质感动漫画风、浅色矿物色调，各人外形和场景有区别。"
-              "标签仅作视觉比喻，不能画成真实经历。没有素材的格子画空白淡色背景。"
-              "不要画文字、昵称、标签、边框和水印，文字由程序排版。素材：" + json.dumps(scenes, ensure_ascii=False))
+    scenes = [{"格": i + 1, "昵称": m.get("name", ""), "人格标签": m.get("personality_tag", m.get("model_archetype", "")),
+               "特质短评": m["comment"]} for i, m in enumerate(members)]
+    prompt = ("生成一张完整的正方形2×2人物画像漫画成品，四格顺序为左上、右上、左下、右下。"
+              "每格突出对应人物的特质，以夸张的动作、道具、对比和象征场景画出性格与反差；"
+              "不是群像里的人物特写，不是复述当天事件，也不是四个人摆拍。外形为虚构动漫形象。"
+              "统一宝石质感动漫画风、浅色矿物色调，各格独立构图、人物有区别。"
+              "将每格的昵称、人格标签、特质短评准确画进相应格内，中文清晰可读，文案与画面一体设计。"
+              "不增加或改写文案，不串人，不画QQ号或水印；素材不足四人则只为已有的人安排画面。"
+              "标签用视觉隐喻表达，不编造现实经历。四格连同文案一次完成，后续只整图嵌入。素材："
+              + json.dumps(scenes, ensure_ascii=False))
     if len(prompt) > config.image_gen_max_prompt_chars:
         raise ValueError("member_portrait_prompt_too_long")
     return prompt
@@ -456,10 +435,10 @@ async def generate_member_portraits(card_data: dict, group_id: int) -> Image.Ima
     try:
         result = await asyncio.wait_for(generate_image(build_member_portrait_prompt(card_data), orientation="square"),
                                         timeout=max(1.0, float(config.briefing_portrait_timeout)))
-        def compose():
-            with Image.open(BytesIO(result.image_bytes)) as atlas:
-                return compose_member_portraits(atlas, card_data["active_members"])
-        image = await asyncio.to_thread(compose)
+        def decode():
+            with Image.open(BytesIO(result.image_bytes)) as image:
+                return image.convert("RGB")
+        image = await asyncio.to_thread(decode)
         card_data["member_portrait_status"] = "generated"
         return image
     except Exception as error:
@@ -590,8 +569,8 @@ async def _send_daily_briefing_impl(
                     "【要求】\n"
                     "1. 热门话题按实际材料输出1-5个，每个话题都要带一点具体细节或群友态度，不能只写名词。\n"
                     f"2. active_members 是‘今日群友画像’，选最多4位当日表现鲜明的群友，材料不足可少选或留空，不能凑人。"
-                    "每人根据当天表现创造一个人格标签，comment 用30-50字抓住今天说话、接梗或处理问题的方式，带一个具体行为，"
-                    "不是重新罗列他聊过哪些话题。只评今天的表现，不诊断永久性格，不沿用旧画像，不添加‘仅供娱乐’等免责声明。"
+                    "每人根据当天表现创造一个人格标签，comment 用30-50字突出此人的鲜明特质与反差，结合具体言行提供辨识度，"
+                    "不是重新罗列他聊过哪些话题或复述当天事件。特质要有本批资料依据，不把有限观察绝对化，不沿用旧画像，不添加‘仅供娱乐’等免责声明。"
                     "排除机器人作者，包括role为assistant的消息和明确属于其他机器人的发言。"
                     "user_id 和 source_ids 必须来自本批输入，同一账号只选一次；source_ids至少一条，必须由本人发出。"
                     "引用中他人的原消息、转发、图片识别和助手回复不是本人言论；有[当前消息]或用户消息字段时，只以本人正文作点评依据。\n"
