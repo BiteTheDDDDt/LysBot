@@ -70,7 +70,7 @@ def format_usage_lines(stats):
     return usage_totals(stats) + [f"{name}  ·  {total}" for name, total, _ in usage_models(stats)]
 
 
-def build_card(template, data, *, group_name, group_id, date_label, activity_text="", portrait=None):
+def build_card(template, data, *, group_name, group_id, date_label, activity_text="", portrait=None, member_portraits=None):
     label = f"{date_label}  ·  {str(group_name or group_id)[:48]}"
     blocks = []
     if template == "briefing":
@@ -86,15 +86,11 @@ def build_card(template, data, *, group_name, group_id, date_label, activity_tex
                 ),
                 CardBlock(
                     member_heading,
-                    member_entries,
+                    [] if member_portraits is not None else member_entries,
+                    image=member_portraits,
+                    image_max_height=1600,
                     accent=ACCENT_VIOLET,
                     body_color=TEXT_MEMBER,
-                ),
-                CardBlock(
-                    "群聊收尾",
-                    [data.get("summary") or "今天群里各有各的精彩。"],
-                    accent=ACCENT_CORAL,
-                    body_color=TEXT_SUMMARY,
                 ),
             ]
         )

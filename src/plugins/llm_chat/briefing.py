@@ -11,7 +11,7 @@ from pathlib import Path
 
 from nonebot import logger, get_bots
 from nonebot import require
-from PIL import Image
+from PIL import Image, ImageDraw, ImageOps
 
 # 引入定时任务
 require("nonebot_plugin_apscheduler")
@@ -115,7 +115,7 @@ def _parse_members(items, source_messages) -> list:
             seen.add(uid)
             result.append({"user_id": int(uid), "name": names[uid], "personality_tag": archetype.strip(),
                            "comment": comment.strip(), "source_ids": list(dict.fromkeys(refs))})
-        if len(result) >= MEMBER_LIMIT:
+        if len(result) >= (4 if source_messages is not None else MEMBER_LIMIT):
             break
     return result
 
@@ -205,7 +205,6 @@ def build_briefing_text(card_data: dict) -> str:
     """生成文本版简报，用于发送失败兜底。"""
     topics = card_data.get("topics") or ["今天的话题过于松散，硬拎出来都像在加班。"]
     member_heading, active_members = briefing_member_section(card_data)
-    summary = card_data.get("summary") or "今天群里整体状态：热闹、发散、顺便互相拱火。"
     subtitle = card_data.get("subtitle") or "过去 24 小时群聊速览"
     briefing_model = card_data.get("briefing_model")
 
@@ -222,9 +221,6 @@ def build_briefing_text(card_data: dict) -> str:
         "",
         f"💬 {member_heading}",
         *[f"• {item}" for item in active_members[:MEMBER_LIMIT]],
-        "",
-        "🏷️ 群聊收尾",
-        summary,
     ])
     llm_stats = card_data.get("llm_stats")
     if llm_stats:
@@ -413,10 +409,69 @@ async def generate_briefing_portrait(card_data: dict, group_id: int) -> Image.Im
         return None
 
 
+def compose_member_portraits(atlas: Image.Image, members: list[dict]) -> Image.Image:
+    """Lay out four generated panels and deterministic Chinese captions."""
+    side, gap, caption = 428, 24, 210
+    canvas = Image.new("RGB", (side * 2 + gap, (side + caption) * 2 + gap), "#f5faf7")
+    draw = ImageDraw.Draw(canvas)
+    for index, member in enumerate(members[:4]):
+        col, row = index % 2, index // 2
+        bounds = (col * atlas.width // 2, row * atlas.height // 2,
+                  (col + 1) * atlas.width // 2, (row + 1) * atlas.height // 2)
+        x, y = col * (side + gap), row * (side + caption + gap)
+        with atlas.crop(bounds) as panel:
+            with ImageOps.fit(panel, (side, side)) as fitted:
+                canvas.paste(fitted, (x, y))
+        text_y = y + side + 12
+        for text, size, bold in ((member.get("name", ""), 25, True),
+                                  (member.get("personality_tag", member.get("model_archetype", "")), 23, True),
+                                  (member.get("comment", ""), 20, False)):
+            font = _get_font(size, bold)
+            for line in wrap_text_pixel(str(text), font, side - 20, draw):
+                draw.text((x + 10, text_y), line, font=font, fill="#263f3b")
+                text_y += size + 7
+    return canvas
+
+
+def build_member_portrait_prompt(card_data: dict) -> str:
+    members = [m for m in card_data.get("active_members", []) if isinstance(m, dict)][:4]
+    if not members:
+        raise ValueError("no_member_portrait_material")
+    scenes = [{"格": i + 1, "标签": m.get("personality_tag", m.get("model_archetype", "")),
+               "当天表现": m["comment"]} for i, m in enumerate(members)]
+    prompt = ("画一张正方形2×2四格人物插画，严格等宽等高无间隙，按左上、右上、左下、右下顺序。"
+              "每格只画对应的一位虚构成年群友，以当天表现设计动作、道具和小场景；不是现实肖像。"
+              "四格使用统一的宝石质感动漫画风、浅色矿物色调，各人外形和场景有区别。"
+              "标签仅作视觉比喻，不能画成真实经历。没有素材的格子画空白淡色背景。"
+              "不要画文字、昵称、标签、边框和水印，文字由程序排版。素材：" + json.dumps(scenes, ensure_ascii=False))
+    if len(prompt) > config.image_gen_max_prompt_chars:
+        raise ValueError("member_portrait_prompt_too_long")
+    return prompt
+
+
+async def generate_member_portraits(card_data: dict, group_id: int) -> Image.Image | None:
+    from .roles import role_available
+    if not config.briefing_enable_portrait or not role_available("image_gen") or not card_data.get("active_members"):
+        return None
+    try:
+        result = await asyncio.wait_for(generate_image(build_member_portrait_prompt(card_data), orientation="square"),
+                                        timeout=max(1.0, float(config.briefing_portrait_timeout)))
+        def compose():
+            with Image.open(BytesIO(result.image_bytes)) as atlas:
+                return compose_member_portraits(atlas, card_data["active_members"])
+        image = await asyncio.to_thread(compose)
+        card_data["member_portrait_status"] = "generated"
+        return image
+    except Exception as error:
+        card_data["member_portrait_status"] = "failed"
+        logger.warning(f"[每日简报] 个人四格生成失败，保留文字画像 group={group_id}: {error}")
+        return None
+
+
 def render_briefing_image(card_data: dict, group_name: str, group_id: int, date_label: str,
-                          activity_text: str, portrait: Image.Image | None = None) -> Image.Image:
+                          activity_text: str, portrait: Image.Image | None = None, member_portraits: Image.Image | None = None) -> Image.Image:
     return render_card("briefing", card_data, group_name=group_name, group_id=group_id,
-                       date_label=date_label, activity_text=activity_text, portrait=portrait)
+                       date_label=date_label, activity_text=activity_text, portrait=portrait, member_portraits=member_portraits)
 
 
 def save_briefing_image(image: Image.Image, group_id: int) -> Path:
@@ -530,18 +585,16 @@ async def _send_daily_briefing_impl(
                     '  "subtitle": "一句 10-24 字的副标题，概括全天氛围",\n'
                     '  "topics": ["带细节的话题1", "带细节的话题2", "带细节的话题3", "可选话题4", "可选话题5"],\n'
                     '  "active_members": [{"user_id":123,"personality_tag":"当天动态生成的人格标签","comment":"基于本人当日发言的短评","source_ids":[原消息ID]}],\n'
-                    '  "summary": "一段 60-120 字、2-3 句的毒舌/幽默总结",\n'
                     '  "portrait_prompt": "150-300字的横版群像插画场景，描绘当天代表性的群聊互动"\n'
                     "}\n\n"
                     "【要求】\n"
                     "1. 热门话题按实际材料输出1-5个，每个话题都要带一点具体细节或群友态度，不能只写名词。\n"
-                    f"2. active_members 是‘今日群友画像’，选3-{MEMBER_LIMIT}位当日表现鲜明的群友，材料不足可少选或留空，不能凑人。"
+                    f"2. active_members 是‘今日群友画像’，选最多4位当日表现鲜明的群友，材料不足可少选或留空，不能凑人。"
                     "每人根据当天表现创造一个人格标签，comment 用30-50字抓住今天说话、接梗或处理问题的方式，带一个具体行为，"
                     "不是重新罗列他聊过哪些话题。只评今天的表现，不诊断永久性格，不沿用旧画像，不添加‘仅供娱乐’等免责声明。"
                     "排除机器人作者，包括role为assistant的消息和明确属于其他机器人的发言。"
                     "user_id 和 source_ids 必须来自本批输入，同一账号只选一次；source_ids至少一条，必须由本人发出。"
                     "引用中他人的原消息、转发、图片识别和助手回复不是本人言论；有[当前消息]或用户消息字段时，只以本人正文作点评依据。\n"
-                    "3. summary 用2-3句概括当天氛围与名场面，通常60-120字；幽默或毒舌按素材自然发挥，不必升华。\n"
                     "4. 严格遵守上述结构：active_members是对象数组，user_id和source_ids使用整数；topics是字符串数组，其余字段是字符串，不返回null。\n"
                     "5. 必须综合全天内容，优先概括重复出现的话题、情绪变化和名场面，不能只总结最后几条消息。\n"
                     "6. 材料不足时少写，不为凑栏目虚构话题。\n\n"
@@ -587,10 +640,13 @@ async def _send_daily_briefing_impl(
                     async with execution_scope(ExecutionPolicy("briefing.card", permission="send", check_result=False)) as resources:
                         if portrait is not None:
                             resources.callback(portrait.close)
+                        member_portraits = await generate_member_portraits(card_data, group_id)
+                        if member_portraits is not None:
+                            resources.callback(member_portraits.close)
                         image = await resources.create(lambda: render_briefing_image(
                             card_data=card_data, group_name=group_name, group_id=group_id,
                             date_label=target_date.isoformat(), activity_text=message_count_text,
-                            portrait=portrait,
+                            portrait=portrait, member_portraits=member_portraits,
                         ), lambda image: image.close())
                         image_path = await resources.create(lambda: save_briefing_image(image, group_id), cleanup_briefing_image)
                         await deliver_briefing(bot, group_id, card_data, image_path, briefing_date=target_date)

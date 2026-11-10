@@ -68,6 +68,28 @@ class BriefingRenderTests(unittest.TestCase):
         self.assertEqual(material["话题1"], card["topics"][0])
         self.assertEqual(material["人物行动1"], card["active_members"][0])
 
+    def test_member_grid_keeps_order_and_removes_closing_section(self):
+        atlas = Image.new("RGB", (200, 200))
+        draw = ImageDraw.Draw(atlas)
+        colors = ["red", "green", "blue", "yellow"]
+        for i, color in enumerate(colors):
+            x, y = (i % 2) * 100, (i // 2) * 100
+            draw.rectangle((x, y, x + 99, y + 99), fill=color)
+        members = [{"name": f"群友{i}", "personality_tag": "原文质检员", "comment": "亲自核对了原文", "source_ids": [i]} for i in range(4)]
+        with briefing.compose_member_portraits(atlas, members) as grid:
+            for i, color in enumerate(colors):
+                from PIL import ImageColor
+                self.assertEqual(grid.getpixel(((i % 2) * 452 + 10, (i // 2) * 662 + 10)), ImageColor.getrgb(color))
+            from src.plugins.llm_chat.card_templates import build_card
+            doc = build_card("briefing", {"active_members": members, "summary": "不应显示"},
+                             group_name="测试", group_id=1, date_label="今天", member_portraits=grid)
+            self.assertNotIn("群聊收尾", [b.heading for b in doc.blocks])
+            block = next(b for b in doc.blocks if b.heading == "今日群友画像")
+            self.assertIs(block.image, grid)
+            self.assertEqual(block.entries, [])
+        self.assertNotIn("群聊收尾", briefing.build_briefing_text({"summary": "不应显示"}))
+        atlas.close()
+
     def test_stray_markup_at_json_end_preserves_real_content(self):
         raw = '{"topics":["额度重置与煎蛋"],"summary":"A > B 是原文","portrait_prompt":"群友围坐厨房">\n}'
         card = briefing.parse_briefing_payload(raw)
@@ -128,7 +150,7 @@ class BriefingRenderTests(unittest.TestCase):
 
         self.assertEqual(image.mode, "RGB")
         self.assertEqual(image.width, briefing.SVG_WIDTH)
-        self.assertGreater(image.height, 800)
+        self.assertGreater(image.height, 600)
 
     def test_pixel_wrap_does_not_leave_chinese_punctuation_on_its_own_line(self):
         font = briefing._get_font(24)

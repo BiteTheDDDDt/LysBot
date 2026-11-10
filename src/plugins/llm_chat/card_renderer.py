@@ -19,6 +19,7 @@ class CardBlock:
     accent: tuple = (47, 139, 123)
     body_color: tuple = (54, 76, 71)
     image: Image.Image | None = None
+    image_max_height: int = 600
     body_size: int = 26
     entry_lines: int = 16
 
@@ -59,7 +60,7 @@ def render_document(document: CardDocument) -> Image.Image:
         ]
         meta = [line for entry in block.metadata for line in lines(entry, 19, text_width, 3)]
         thumbnail = (
-            ImageOps.contain(block.image, (text_width, 600), Image.Resampling.LANCZOS).convert("RGBA")
+            ImageOps.contain(block.image, (text_width, block.image_max_height), Image.Resampling.LANCZOS).convert("RGBA")
             if block.image
             else None
         )

@@ -89,19 +89,19 @@ class BriefingPersonaTests(unittest.TestCase):
         legacy = briefing.parse_briefing_payload(plain)
         self.assertEqual(legacy["active_members"], ["群友甲：自称什么都懂"])
 
-    def test_five_member_cards_share_text_and_image_format_without_internal_ids(self):
+    def test_four_member_cards_share_text_and_image_format_without_internal_ids(self):
         self.sources = [Message("user", f"成员{i}本人观点", name=f"成员{i}", sender_id=100 + i, source_id=200 + i)
                         for i in range(6)]
         card = self.parse([self.entry(user_id=100 + i, source_ids=[200 + i]) for i in range(6)])
-        self.assertEqual(len(card["active_members"]), briefing.MEMBER_LIMIT)
+        self.assertEqual(len(card["active_members"]), 4)
         document = build_card("briefing", card, group_name="群", group_id=7, date_label="2026-10-22")
         block = next(block for block in document.blocks if block.heading == "今日群友画像")
-        self.assertEqual(len(block.entries), 5)
+        self.assertEqual(len(block.entries), 4)
         text = briefing.build_briefing_text(card)
         for entry in block.entries:
             self.assertIn(entry, text)
-        self.assertIn("成员4 · 原文质检员", text)
-        for absent in ("成员5", "source_ids", "user_id", "仅供娱乐"):
+        self.assertIn("成员3 · 原文质检员", text)
+        for absent in ("成员4", "source_ids", "user_id", "仅供娱乐"):
             self.assertNotIn(absent, text)
 
     def test_portrait_uses_actual_scene_not_model_personality_analogy(self):

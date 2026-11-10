@@ -62,7 +62,7 @@ class CardTemplateTests(unittest.TestCase):
         self.assertEqual(image.mode, "RGB")
         self.assertEqual(len(usage_models(STATS)), 7)
         document = build_card("briefing", {"llm_stats": STATS}, **CONTEXT)
-        self.assertEqual(len(document.blocks), 4)
+        self.assertEqual(len(document.blocks), 3)
         self.assertEqual(document.blocks[-1].heading, "AI 调用统计")
         self.assertIn("provider:model-6", "\n".join(document.blocks[-1].entries))
 
