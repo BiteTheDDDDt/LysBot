@@ -31,6 +31,15 @@ class MediaValidationFailure(str):
     """Invalid arguments rejected before any generation, quota or delivery attempt."""
 
 
+class ToolDeliveryResult(str):
+    """Model-facing text with the delivery state for programmatic callers."""
+
+    def __new__(cls, message: str, delivery_status: str):
+        result = super().__new__(cls, message)
+        result.delivery_status = delivery_status
+        return result
+
+
 def _exclusive_media(kind):
     def decorate(function):
         @wraps(function)
@@ -463,7 +472,7 @@ async def send_picked_meme(planned: Optional[Dict[str, Any]], allow_reply: bool 
         raise
     except Exception as error:
         logger.warning(f"[send_meme] 已发送，更新使用计数失败 id={meme_id}: {error}")
-    return f"已发送 {topic} 表情包：{(description or '')[:80]}"
+    return ToolDeliveryResult(f"已发送 {topic} 表情包：{(description or '')[:80]}", "sent")
 
 
 @_exclusive_media("voice")
@@ -844,7 +853,7 @@ async def send_poke(target_id: str, reason: str = "") -> str:
     if target in attempts:
         return attempts[target]
     # Set before awaiting so concurrent calls and cancellation cannot resend.
-    attempts[target] = "戳一戳发送结果未知，已有执行尝试，不再重复发送"
+    attempts[target] = ToolDeliveryResult("戳一戳发送结果未知，已有执行尝试，不再重复发送", "unconfirmed")
     result = await _send_poke_once(target, reason)
     attempts[target] = result
     return result
@@ -889,7 +898,7 @@ async def _send_poke_once(target_id: str, reason: str = "") -> str:
                 await record_tool_delivery("sent",receipt)
                 reason_hint = f"（原因：{reason}）" if reason else ""
                 logger.info(f"[send_poke] action={action_name} group={group_id} target={target_qq}")
-                return f"戳一戳已发送给 {target_qq}{reason_hint}"
+                return ToolDeliveryResult(f"戳一戳已发送给 {target_qq}{reason_hint}", "sent")
             except Exception as e:
                 api_errors.append(f"{action_name}: {e}")
                 logger.debug(f"[send_poke] action={action_name} 失败: {e}")
@@ -898,7 +907,7 @@ async def _send_poke_once(target_id: str, reason: str = "") -> str:
                     any(term in str(info.get("wording",info.get("message",""))).lower()
                         for term in ("unknown action","unsupported action","not implemented","不支持的api")))
                 if not unsupported:
-                    return "戳一戳发送结果未知，已停止自动重试，不能确认对方已收到。"
+                    return ToolDeliveryResult("戳一戳发送结果未知，已停止自动重试，不能确认对方已收到。", "unconfirmed")
 
         # 兜底：部分实现接受 CQ:poke。若平台忽略该 CQ 码，日志里会保留 API 失败信息。
         await bot.send_group_msg(
@@ -908,14 +917,14 @@ async def _send_poke_once(target_id: str, reason: str = "") -> str:
 
         reason_hint = f"（原因：{reason}）" if reason else ""
         logger.info(f"[send_poke] fallback=CQ group={group_id} target={target_qq} api_errors={api_errors[:2]}")
-        return (
+        return ToolDeliveryResult(
             f"戳一戳已尝试通过 CQ 码发送给 {target_qq}{reason_hint}，"
-            "但当前平台可能不支持，请不要承诺已经戳到"
+            "但当前平台可能不支持，请不要承诺已经戳到", "unconfirmed",
         )
     except Exception as e:
         detail = "; ".join(api_errors[-3:])
         suffix = f"；API 失败：{detail}" if detail else ""
-        return f"戳一戳发送失败: {str(e)}{suffix}"
+        return ToolDeliveryResult(f"戳一戳发送失败: {e}{suffix}", "unconfirmed")
 
 # 注册戳一戳函数
 

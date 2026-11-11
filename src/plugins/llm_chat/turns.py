@@ -190,7 +190,7 @@ async def send_response_turn(
             if kind == "meme":
                 result = await send_picked_meme(payload if isinstance(payload, dict) else None, allow_reply=is_first)
                 logger.info(f"[turn] 发送表情包结果: {result[:100]}")
-                if result.startswith("已发送"):
+                if getattr(result, "delivery_status", None) == "sent":
                     from .tools import get_last_sent_meme
 
                     sent_meme = get_last_sent_meme()

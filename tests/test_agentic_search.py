@@ -738,7 +738,9 @@ class SearchStorageTests(unittest.IsolatedAsyncioTestCase):
                         self.assertNotIn(field, found["coverage"])
                     self.assertNotIn("vector_coverage_incomplete", found["warnings"])
 
-    async def test_correction_keeps_attempts_without_reusing_answer_as_evidence_or_actions(self):
+    async def test_interrupted_context_keeps_attempts_without_reusing_answer_as_evidence_or_actions(self):
+        from src.plugins.llm_chat.working_context import restore_context
+
         old = AgentRunner("group_7")
         old.memory_path, old.memory_generation, old.requester_id = self.manager._db_path, 0, 101
         old.tool_calls = 1
@@ -746,18 +748,20 @@ class SearchStorageTests(unittest.IsolatedAsyncioTestCase):
             "name": "query_history", "arguments": '{"sql":"SELECT name FROM messages LIMIT 1"}'
         }}]}]
         old.actions = {"reply": {"status": "sent", "receipt": 123}}
-        await old.finish("complete", "错误候选")
+        await old.finish("interrupted", "错误候选")
         new = AgentRunner("group_7")
         new.memory_path, new.memory_generation, new.requester_id = self.manager._db_path, 0, 101
-        await new.resume_correction()
+        await restore_context(new)
         self.assertIn("SELECT name", new.transcript[0]["content"])
-        self.assertIn("旧回答可能错误", new.transcript[0]["content"])
+        note = json.loads(new.transcript[0]["content"].split("\n", 1)[1])[0]
+        self.assertEqual(note["status"], "interrupted")
+        self.assertEqual(note["answer"], "")
         self.assertFalse(new.actions)
         self.assertFalse(new.evidence)
         for owner, gen in [(202, 0), (101, 1)]:
             other = AgentRunner("group_7")
             other.memory_path, other.memory_generation, other.requester_id = self.manager._db_path, gen, owner
-            await other.resume_correction()
+            await restore_context(other)
             self.assertFalse(other.transcript)
 
 
@@ -911,16 +915,6 @@ class RunnerContractTests(unittest.IsolatedAsyncioTestCase):
         # A locally enforced step deadline is labelled separately so the retry
         # policy cannot confuse it with a transient upstream timeout.
         self.assertEqual(run.step_metrics[-1]["status"], "StepTimeout")
-
-    async def test_only_explicit_correction_loads_completed_search_context(self):
-        for text, expected in [("我是问本群的R神", True), ("我问的是去年那次", True), ("我问个新问题", False)]:
-            run = AgentRunner()
-            with patch.object(run, "resume_correction", AsyncMock()) as resume:
-                try:
-                    await run.start([models.Message(role="user", content=text, sender_id=101)])
-                    self.assertEqual(resume.await_count, int(expected))
-                finally:
-                    await run.finish("complete")
 
     async def test_search_grounding_notice_and_timeout_do_not_affect_initial_or_media_step(self):
         from types import SimpleNamespace

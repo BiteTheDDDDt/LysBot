@@ -35,11 +35,6 @@ class GroupSentimentState:
 class SentimentAnalyzer:
     """情感分析器 - 基于LLM的智能情感分析"""
 
-    # 强负面关键词（快速路径，立即触发）
-    STRONG_NEGATIVE = [
-        "滚", "滚开", "滚蛋", "傻逼", "脑残", "有病", "闭嘴", "去死",
-    ]
-
     def __init__(self):
         # 群情感状态 {group_id: GroupSentimentState}
         self._group_states: Dict[int, GroupSentimentState] = {}
@@ -59,19 +54,6 @@ class SentimentAnalyzer:
         if group_id not in self._group_states:
             self._group_states[group_id] = GroupSentimentState()
         return self._group_states[group_id]
-
-    def _is_about_bot(self, message: str) -> bool:
-        """判断消息是否关于bot"""
-        message_lower = message.lower()
-        from .config import PERSONA
-        bot_mentions = ["bot", "机器人", PERSONA.name, *PERSONA.aliases]
-        for mention in bot_mentions:
-            if mention in message_lower:
-                return True
-        # 检查@机器人（CQ码已在处理前移除，这里检查残留）
-        if "[CQ:at" in message:
-            return True
-        return False
 
     async def _analyze_with_llm(self, message: str, *, session_id: str = "_unknown_") -> tuple[str, float]:
         """使用LLM分析情感
@@ -103,7 +85,7 @@ class SentimentAnalyzer:
                             timeout=max(0.1, float(config.sentiment_total_timeout)),
                         )
                     except asyncio.TimeoutError:
-                        result = self._rule_based_analysis(message)
+                        result = ("neutral", 0.0)
                     completed_at = time.time()
                     self._llm_cache[cache_key] = (result, completed_at)
                     for key, (_, timestamp) in list(self._llm_cache.items()):
@@ -157,46 +139,15 @@ class SentimentAnalyzer:
             result = await model_manager.chat(messages, role="sentiment", caller="sentiment:analyze", session_id=session_id)
             result = result.strip().lower()
 
-            # 解析结果
-            if "negative:高" in result or "negative:高" in result:
-                return ("negative", 0.9)
-            elif "negative:中" in result or "negative:中" in result:
-                return ("negative", 0.7)
-            elif "negative:低" in result or "negative:低" in result:
-                return ("negative", 0.5)
-            elif "negative" in result:
-                return ("negative", 0.7)
-            elif "positive" in result:
-                return ("positive", 0.6)
-            else:
-                return ("neutral", 0.0)
-
-        except Exception as e:
-            logger.warning(f"[情感分析] LLM分析失败: {e}，回退到规则判断")
-            return self._rule_based_analysis(message)
-
-    def _rule_based_analysis(self, message: str) -> tuple[str, float]:
-        """基于规则的快速分析（作为回退）"""
-        clean_msg = message.strip()
-
-        # 检测强负面
-        for keyword in self.STRONG_NEGATIVE:
-            if keyword in clean_msg:
-                return ("negative", 0.8)
-
-        # 简单关键词检测
-        negative_keywords = ["闭嘴", "烦", "滚", "别说了", "别发", "别吵", "讨厌", "恶心", "无语"]
-        positive_keywords = ["可爱", "喜欢", "好玩", "有趣", "哈哈", "谢谢", "棒"]
-
-        neg_count = sum(1 for k in negative_keywords if k in clean_msg)
-        pos_count = sum(1 for k in positive_keywords if k in clean_msg)
-
-        if neg_count > 0 and neg_count >= pos_count:
-            return ("negative", min(0.7, 0.4 + neg_count * 0.1))
-        elif pos_count > 0 and pos_count > neg_count:
-            return ("positive", 0.5)
-
-        return ("neutral", 0.0)
+            return {
+                "negative:高": ("negative", 0.9),
+                "negative:中": ("negative", 0.7),
+                "negative:低": ("negative", 0.5),
+                "positive": ("positive", 0.6),
+            }.get(result, ("neutral", 0.0))
+        except Exception as error:
+            logger.warning(f"[情感分析] 模型不可用: {type(error).__name__}")
+            return ("neutral", 0.0)
 
     async def analyze(
         self,
@@ -230,8 +181,7 @@ class SentimentAnalyzer:
         # 检查是否是真的在说bot
         from .proactive import proactive_manager
         bot_just_spoke = proactive_manager.just_spoke(group_id, within_seconds=20.0)
-        about_bot_by_name = self._is_about_bot(clean_msg)
-        actually_about_bot = is_to_bot or about_bot_by_name or (bot_just_spoke and not directed_at_other)
+        actually_about_bot = is_to_bot or (bot_just_spoke and not directed_at_other)
 
         if not actually_about_bot:
             return SentimentRecord(
@@ -241,19 +191,6 @@ class SentimentAnalyzer:
                 sentiment_type='neutral',
                 confidence=0.0
             )
-
-        # 强负面快速路径
-        for keyword in self.STRONG_NEGATIVE:
-            if clean_msg.strip("，。！？!? ") == keyword:
-                record = SentimentRecord(
-                    content=message,
-                    timestamp=time.time(),
-                    user_id=user_id,
-                    sentiment_type='negative',
-                    confidence=0.9
-                )
-                self._update_state(state, record)
-                return record
 
         # 使用LLM分析
         sentiment_type, confidence = await self._analyze_with_llm(clean_msg, session_id=f"group_{group_id}")

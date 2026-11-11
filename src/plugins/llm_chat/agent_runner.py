@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-import re
 import time
 import uuid
 from contextvars import ContextVar
@@ -107,6 +106,7 @@ class AgentRunner:
         self.reply_policy = None
         self.render_fallback = None
         self.context_run_ids = []
+        self.context_questions: list[str] = []
         self.injected_memories = []
         self.memory_correction_epoch = ""
         self.api_errors = []
@@ -147,14 +147,7 @@ class AgentRunner:
                 general_logger.warning(f"[agent_start] memory unavailable: {type(error).__name__}")
         active_runs[self.session_id] = self
         latest = messages[-1].content if messages else ""
-        from .identity_guard import is_identity_question
-
         self.user_question = latest or ""
-        self.identity_question = is_identity_question(self.user_question)
-        if re.search(r"继续(?:刚才|上次|查|搜|检索)|接着(?:查|搜)|(?:^|[:：\n])\s*继续[。！!]?\s*$", latest or ""):
-            await self.resume_previous()
-        elif re.search(r"我是问|我问的是|我说的是|不是这个|不对|答错", latest or ""):
-            await self.resume_correction()
         from .working_context import restore_context
         from sqlite3 import Error as SQLiteError
 
@@ -170,130 +163,6 @@ class AgentRunner:
         for message in supplied[-12:]:
             register_user_links(self, message.content)
         await self.checkpoint()
-
-    async def resume_correction(self):
-        """Carry recent search attempts into a correction, without replaying actions."""
-        if not self.memory_path or self.memory_generation is None or not self.requester_id:
-            return
-        from .memory_index import connect
-
-        def load():
-            with connect(self.memory_path) as db:
-                rows = db.execute(
-                    "SELECT state_json FROM agent_runs WHERE session_id=? AND generation=? "
-                    "AND status='complete' AND updated_at>? ORDER BY updated_at DESC LIMIT 10",
-                    (self.session_id, self.memory_generation, time.time() - 1800),
-                ).fetchall()
-                for row in rows:
-                    state = json.loads(row[0])
-                    if state.get("memory_correction_epoch", "") != self.memory_correction_epoch:
-                        continue
-                    if state.get("requester_id") == self.requester_id and state.get("tool_calls"):
-                        return state
-            return None
-
-        state = await asyncio.to_thread(load)
-        if not state:
-            return
-        if state.get("identity_question"):
-            self.identity_question = True
-            self.user_question = (state.get("user_question") or "") + "\n本轮纠正：" + self.user_question
-        attempts = [
-            call.get("function", {}) for message in state.get("transcript", [])
-            for call in message.get("tool_calls", []) if call.get("function", {}).get("name") in READ_TOOLS
-        ][-6:]
-        note = {
-            "previous_answer_under_correction": confirmed_reply(state)[:500],
-            "previous_search_attempts": [
-                {"tool": call.get("name"), "arguments": str(call.get("arguments", ""))[:1200]} for call in attempts
-            ],
-        }
-        self.transcript.append({
-            "role": "user",
-            "content": "同一请求者最近一轮检索的纠正上下文：旧回答可能错误，查询记录不是证据。"
-            "结合本轮要求重新核实候选，避免重复已无效的查询。\n" + json.dumps(note, ensure_ascii=False),
-        })
-
-    async def resume_previous(self):
-        if not self.memory_path or self.memory_generation is None or not self.requester_id:
-            return
-        from .memory_index import connect
-
-        def load():
-            with connect(self.memory_path) as db:
-                rows = db.execute(
-                    """SELECT id,state_json FROM agent_runs WHERE session_id=? AND generation=?
-                    AND status='interrupted' AND updated_at>? ORDER BY updated_at DESC LIMIT 10""",
-                    (self.session_id, self.memory_generation, time.time() - 1800),
-                ).fetchall()
-                for old_id, payload in rows:
-                    state = json.loads(payload)
-                    if state.get("memory_correction_epoch", "") != self.memory_correction_epoch:
-                        continue
-                    if state.get("requester_id") == self.requester_id:
-                        return old_id, state
-            return None
-
-        previous = await asyncio.to_thread(load)
-        if not previous:
-            return
-        old_id, state = previous
-        # Reuse observations, never replay a historical execution plan.
-        self.sources = state.get("sources", {})
-        self.evidence = {}
-        from .retrieval import HistorySearch
-
-        for key, item in list(state.get("evidence", {}).items())[-30:]:
-            if key.startswith(("h:", "i:")):
-                checked = await HistorySearch(self.memory_path).read(self.session_id, ids=[key], limit=1)
-                if checked["status"] != "ok":
-                    continue
-                fresh = checked["items"][0]
-                if (
-                    key.startswith("h:")
-                    and item.get("content_hash")
-                    and item["content_hash"] != fresh.get("content_hash")
-                ):
-                    continue
-                item = {**item, "excerpt": fresh.get("excerpt", "")[:500]}
-            elif key.startswith("k:"):
-                from .knowledge import refresh_evidence
-                fresh = await asyncio.to_thread(refresh_evidence, {**item, "id": key})
-                if fresh is None:
-                    continue
-                item = fresh
-            elif key.startswith("w:"):
-                source = self.sources.get(key, {})
-                if time.time() - source.get("created_at", 0) > 3600:
-                    continue
-                if item.get("read_state") == "native_search" and any(
-                    time.time() - self.sources.get(ref, {}).get("created_at", 0) > 3600
-                    for ref in item.get("source_ids", [key])
-                ):
-                    continue
-            self.evidence[key] = {
-                **item, "read_state": "native_search" if item.get("read_state") == "native_search" else "recovered_lead",
-            }
-        self.actions = state.get("actions", {})
-        for action in self.actions.values():
-            if action.get("status") == "started":
-                action["status"] = "unknown"
-        notes = [
-            {"id": key, "excerpt": value.get("excerpt", "")[:4000 if value.get("read_state") == "native_search" else 500],
-             "source_ids": value.get("source_ids", []), "provenance": value.get("provenance"),
-             "searched_at": value.get("searched_at"),
-             "related_sources": [{"id": ref, "url": self.sources[ref]["url"]}
-                                 for ref in value.get("source_ids", []) if ref in self.sources]}
-            for key, value in list(self.evidence.items())[-16:]
-        ]
-        self.transcript = [
-            {
-                "role": "user",
-                "content": "上次中断查询留下的来源线索，请核验时效和用户当前要求后继续："
-                + json.dumps(notes, ensure_ascii=False),
-            }
-        ]
-        general_logger.info(f"[agent_resume] run={self.id} previous={old_id} sources={len(notes)}")
 
     async def validate_scope(self):
         if not self.memory_path or self.memory_generation is None:
@@ -425,11 +294,6 @@ class AgentRunner:
                 "read_evidence_ids": [
                     key for key, value in self.evidence.items()
                     if value.get("read_state") in {"original", "native_search"}
-                ],
-                "unresolved": [
-                    sentence.strip()
-                    for sentence in re.split(r"(?<=[。！？])|\n", str(answer))
-                    if re.search(r"无法确认|未能核实|证据不足|尚未确认|还不确定", sentence)
                 ],
                 "tool_limitations": [
                     value for value in self.outcomes.values() if value.get("status") in {"partial", "unavailable"}
@@ -750,23 +614,21 @@ class AgentRunner:
             else:
                 value = str(result)
                 try:
-                    delivery = json.loads(value).get("delivery_status")
-                except (ValueError, AttributeError):
-                    delivery = None
-                if delivery == "unconfirmed" or any(
-                    term in value for term in ("结果未知", "已尝试通过 CQ", "发送失败")
-                ):
+                    payload = json.loads(value)
+                except ValueError:
+                    payload = {}
+                if not isinstance(payload, dict):
+                    payload = {}
+                delivery = getattr(result, "delivery_status", None) or payload.get("delivery_status")
+                recorded = self.actions[key]["status"]
+                if delivery == "unconfirmed" or recorded == "unknown":
                     status = "unknown"
-                elif delivery in {"confirmed", "sent"} or "已发送" in value:
+                elif delivery in {"confirmed", "sent"} or recorded == "sent":
                     status = "sent"
+                elif name == "revise_memory" and payload.get("status") in {"preview", "applied", "undone"}:
+                    status = "completed"
                 else:
                     status = "failed"
-                if name == "revise_memory":
-                    try:
-                        if json.loads(value).get("status") in {"preview", "applied", "undone"}:
-                            status = "completed"
-                    except (ValueError, AttributeError):
-                        pass
                 self.actions[key].update(status=status, result=value)
             await self.checkpoint()
         return result

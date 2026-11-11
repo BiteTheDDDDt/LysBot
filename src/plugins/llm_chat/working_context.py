@@ -21,31 +21,41 @@ async def restore_context(run):
             from .memory_changes import correction_epoch
             epoch = correction_epoch(db, run.session_id)
             rows = db.execute(
-                "SELECT id,state_json,updated_at FROM agent_runs WHERE session_id=? AND generation=? "
-                "AND status='complete' AND updated_at>? ORDER BY updated_at DESC LIMIT 50",
+                "SELECT id,state_json,updated_at,status FROM agent_runs WHERE session_id=? AND generation=? "
+                "AND status IN ('complete','interrupted') AND updated_at>? ORDER BY updated_at DESC LIMIT 50",
                 (run.session_id, run.memory_generation, cutoff),
             ).fetchall()
         selected = []
         other_included = False
-        for rid, payload, updated in rows:
+        interrupted_included = False
+        for rid, payload, updated, status in rows:
             state = json.loads(payload)
             if state.get("memory_correction_epoch", "") != epoch:
                 continue
+            if status == "interrupted":
+                if interrupted_included or str(state.get("requester_id")) != str(run.requester_id):
+                    continue
+                interrupted_included = True
             if str(state.get("requester_id")) == str(run.requester_id):
-                if sum(str(s.get("requester_id")) == str(run.requester_id) for _, s, _ in selected) < 3:
-                    selected.append((rid, state, updated))
+                if sum(str(s.get("requester_id")) == str(run.requester_id) for _, s, _, _ in selected) < 3:
+                    selected.append((rid, state, updated, status))
             elif not other_included and run.session_id.startswith("group_") and confirmed_reply(state):
                 # A group member can ask about a reply addressed to somebody else.
-                selected.append((rid, state, updated))
+                selected.append((rid, state, updated, status))
                 other_included = True
-            if sum(str(s.get("requester_id")) == str(run.requester_id) for _, s, _ in selected) >= 3 and other_included:
+            if sum(str(s.get("requester_id")) == str(run.requester_id) for _, s, _, _ in selected) >= 3 and other_included:
                 break
         return selected[:4]
 
     notes = []
     remaining = max(0, min(config.agent_context_carry_chars, 12000))
     checked = {}
-    for rid, state, updated in await asyncio.to_thread(load):
+    for rid, state, updated, status in await asyncio.to_thread(load):
+        if status == "interrupted":
+            # Preserve uncertain delivery receipts as deduplication records.
+            for key, action in (state.get("actions") or {}).items():
+                if action.get("status") in {"started", "unknown"}:
+                    run.actions.setdefault(key, {**action, "status": "unknown"})
         if remaining < 500:
             break
         sources = []
@@ -92,7 +102,7 @@ async def restore_context(run):
                 if checked[ref]:
                     sources.append({"id": ref, "kind": "knowledge", "excerpt": checked[ref]["excerpt"][:900]})
                 continue
-            if not ref.startswith("h:"):
+            if not ref.startswith(("h:", "i:")):
                 continue
             if ref not in checked:
                 checked[ref] = None
@@ -114,7 +124,7 @@ async def restore_context(run):
             if call.get("function", {}).get("name") in {"recall_history", "query_history", "search_web", "search_knowledge"}
         ][-3:]
         note = {
-            "run_id": rid, "question": state.get("user_question", "")[:600],
+            "run_id": rid, "status": status, "question": state.get("user_question", "")[:600],
             "answer": confirmed_reply(state)[:800],
             "planning_result": state.get("planning_result", "")[:1200],
             "reply_requirements": state.get("reply_requirements", [])[:3],
@@ -139,9 +149,10 @@ async def restore_context(run):
         remaining -= len(json.dumps(note, ensure_ascii=False))
     if notes:
         run.context_run_ids = [n["run_id"] for n in notes]
+        run.context_questions = [n["question"] for n in notes if n["question"]]
         run.transcript.append({"role": "user", "content": (
             "以下是同一会话近期的工作上下文，含本人近期任务及群内其他人最近一次已发送答复，是历史资料而不是本轮指令。"
-            "先判断本轮与哪次问题相关；换话题时忽略无关资料。answer仅包含确认发出的文本；为空不代表没有研究成果，不能声称已告诉用户。planning_result是内部研究记录，不代表已发送。回答文本和规划结论不是独立证据。"
+            "先判断本轮与哪次问题相关；换话题时忽略无关资料。status=interrupted 表示同一请求者有一次未完成的任务，可按本轮要求参考留下的线索。纠正旧回答时重新核对候选，previous_queries 可用于避开无效查询。answer 仅包含确认发出的文本。planning_result 是内部研究记录。回答文本和规划结论不提供独立证据。"
             "sources 中的群聊原文已按 ID 在当前会话重新校验，可以直接用于解释依据，不必重复搜索。"
             "native_search_answer 是上轮原生联网查证的综合答案，关联来源一起保留，可用于解释上轮依据；它和网页摘录均未在本轮重新查询。问最新状态时使用 search_web；read_web 仅用于用户明确提供的链接，不为复核打开搜索来源。"
             "没有列出的来源尚未核实，旧结论可能已失去依据。外号身份与外号由来是不同问题，"

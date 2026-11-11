@@ -151,7 +151,7 @@ async def _handle_poke_chat(bot: Bot, user_id: int, group_id: int = None):
             return
         decision.poke_target_id = decision.poke_target_id or "sender"
         result = await execute_planned_side_effect(decision)
-        if result.startswith("戳一戳已发送给 "):
+        if getattr(result, "delivery_status", None) == "sent":
             target = user_id if decision.poke_target_id == "sender" else decision.poke_target_id
             await memory_manager.add_message(0, "assistant", f"[已戳一戳 QQ:{target}]", group_id)
             from .proactive import proactive_manager
@@ -188,11 +188,6 @@ async def _handle_poke_chat(bot: Bot, user_id: int, group_id: int = None):
             format_sent_meme_for_memory,
             meme_was_sent_this_round,
         )
-        from .utils import is_meta_meme_filler
-        if meme_was_sent_this_round() and is_meta_meme_filler(cleaned_response):
-            logger.info(f"[meme] 戳一戳过滤废话文字回复: {cleaned_response!r}")
-            cleaned_response = ""
-
         from .agent_runner import deliver_reply as _deliver_agent_reply
         async def send_text(text, first):
             ensure_send_allowed(group_id)

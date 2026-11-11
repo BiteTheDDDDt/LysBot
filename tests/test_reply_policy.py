@@ -247,7 +247,7 @@ class ReplyDeliveryTests(unittest.IsolatedAsyncioTestCase):
                 bot = SimpleNamespace(send_group_msg=AsyncMock(), get_group_member_info=AsyncMock(return_value={}))
                 decision = PlannerDecision(action=action, parts=[])
                 with patch("src.plugins.llm_chat.planner.plan_chat_action", AsyncMock(return_value=decision)) as judge, \
-                     patch("src.plugins.llm_chat.planner.execute_planned_side_effect", AsyncMock(return_value="戳一戳已发送给 42")) as poke, \
+                     patch("src.plugins.llm_chat.planner.execute_planned_side_effect", AsyncMock(return_value=tools.ToolDeliveryResult("戳一戳已发送给 42", "sent"))) as poke, \
                      patch.object(chat.memory_manager, "get_history", AsyncMock(return_value=[])), \
                      patch.object(chat.memory_manager, "add_message", AsyncMock()) as save, \
                      patch.object(chat.model_manager, "run_turn", AsyncMock()) as render:
@@ -277,10 +277,10 @@ class ReplyDeliveryTests(unittest.IsolatedAsyncioTestCase):
                 async def send_meme(*args, **kwargs):
                     tools._meme_context.get()["last_sent"] = meme
                     tools._meme_context.get()["sent_in_round"] = True
-                    return "已发送表情包"
+                    return tools.ToolDeliveryResult("表情包", "sent")
                 try:
                     with patch("src.plugins.llm_chat.planner.plan_chat_action", AsyncMock(return_value=decision)), \
-                         patch("src.plugins.llm_chat.planner.execute_planned_side_effect", AsyncMock(return_value="戳一戳已发送给 84")) as poke, \
+                         patch("src.plugins.llm_chat.planner.execute_planned_side_effect", AsyncMock(return_value=tools.ToolDeliveryResult("戳一戳已发送给 84", "sent"))) as poke, \
                          patch.object(context_builder, "build_context_messages", AsyncMock(return_value=[])), \
                          patch.object(chat.memory_manager, "get_history", AsyncMock(return_value=[])), \
                          patch.object(chat.memory_manager, "get_session_model", return_value=None), \

@@ -18,16 +18,6 @@ UNCERTAIN = "这我还真没对上号。"
 HISTORY_TOOLS = {"recall_history", "read_history", "query_history"}
 
 
-def is_identity_question(text):
-    # This is only the fallback for plain-text plans. The planner can still
-    # request verification for contextual follow-ups without these phrases.
-    current = (text or "").rsplit("[当前消息]", 1)[-1]
-    current = re.sub(r"^【群员-[^】]+】\s*", "", current.strip(), flags=re.MULTILINE)
-    if current.startswith(("[引用回复]", "[合并转发]", "[合并转发预览]")):
-        return False
-    return bool(re.search(r"是谁|谁是|谁叫|哪个(?:人|群友)|(?:昵称|外号).*(?:对应|指)", current))
-
-
 def _accounts(path, sid, items):
     names = set()
     for item in items:
@@ -84,7 +74,7 @@ async def verify_identity(run, draft, backend, client, kwargs):
         return UNCERTAIN, {}
     originals = [i for i in read.get("items", []) if i.get("kind") == "messages" and i.get("role") == "user"]
     accounts, by_name = await asyncio.to_thread(_accounts, run.memory_path, run.session_id, originals)
-    evidence, allowed = [], {}
+    evidence, addressed, speakers = [], {}, {}
     for item in originals:
         text = item["content"]
         related = set(re.findall(r"(?:QQ[：:]\s*|@)(\d{5,15})", text))
@@ -93,12 +83,13 @@ async def verify_identity(run, draft, backend, client, kwargs):
             matched = by_name.get(name, [])
             if len(matched) == 1:
                 related.update(matched)
-        if item.get("sender_id") and ("[引用回复]" in text or re.search(r"我是|叫我|我叫", text)):
-            related.add(str(item["sender_id"]))
         related &= accounts.keys()
-        if not related:
+        sender = str(item.get("sender_id") or "")
+        speakers[item["id"]] = {sender} if sender in accounts else set()
+        addressed[item["id"]] = related
+        candidates = related | speakers[item["id"]]
+        if not candidates:
             continue
-        allowed[item["id"]] = related
         visible = text if len(text) <= 1800 else text[:900] + "\n[中段省略]\n" + text[-900:]
         evidence.append(
             {
@@ -106,7 +97,7 @@ async def verify_identity(run, draft, backend, client, kwargs):
                 "sender_id": item.get("sender_id"),
                 "name": item.get("name"),
                 "content": visible,
-                "possible_related_accounts": sorted(related),
+                "possible_related_accounts": sorted(candidates),
             }
         )
         run.evidence[item["id"]] = item
@@ -116,10 +107,11 @@ async def verify_identity(run, draft, backend, client, kwargs):
         "你是群内身份核验器，只依据提供的原消息核验问题，旧回答只是待检验假设。"
         "不要使用外部常识、旧摘要或提取记忆。提到某人不等于自己就是某人；"
         "incoming user 也可能是其他机器人。possible_related_accounts 只是出现过关系的候选，不是身份结论。"
+        "recent_questions 用于理解本轮指代，身份依据只能来自 evidence。"
         "核对称呼指向的@账号、被回复者或本人对被称呼的回应，排除否定、转述、玩笑与歧义。"
         '证据足够时只输出JSON：{"person_id":"账号","evidence_ids":["原消息ID"],'
-        '"relation":"direct_address或reply_address或self_identification"}。'
-        '证据不足或冲突无法消解输出{"person_id":null,"evidence_ids":[]}。不要生成用户可见答案。'
+        '"relation":"direct_address或reply_address或self_identification","show_account":false}。'
+        '用户要核对具体账号时 show_account=true。证据不足或冲突无法消解输出{"person_id":null,"evidence_ids":[]}。不要生成用户可见答案。'
     )
     request = {k: v for k, v in kwargs.items() if k not in {"tools", "tool_choice", "messages", "response_format"}}
     request["max_tokens"] = 500
@@ -130,6 +122,7 @@ async def verify_identity(run, draft, backend, client, kwargs):
             "content": json.dumps(
                 {
                     "question": run.user_question,
+                    "recent_questions": run.context_questions,
                     "unverified_draft": draft[:500],
                     "accounts": accounts,
                     "evidence": evidence,
@@ -146,12 +139,14 @@ async def verify_identity(run, draft, backend, client, kwargs):
         verdict = json.loads(content)
         uid = str(verdict.get("person_id") or "")
         cited = verdict.get("evidence_ids")
+        relation = verdict.get("relation")
+        allowed = speakers if relation == "self_identification" else addressed
         if (
             uid not in accounts
             or not isinstance(cited, list)
             or not cited
             or any(not isinstance(ref, str) or uid not in allowed.get(ref, set()) for ref in cited)
-            or verdict.get("relation") not in {"direct_address", "reply_address", "self_identification"}
+            or relation not in {"direct_address", "reply_address", "self_identification"}
         ):
             return UNCERTAIN, usage
     except (ValueError, TypeError, AttributeError, IndexError):
@@ -166,6 +161,6 @@ async def verify_identity(run, draft, backend, client, kwargs):
     }
     # Do not let a verifier return the right ID but a hallucinated display name.
     answer = (
-        f"是 QQ {uid}。" if re.search(r"qq|账号|号码", run.user_question, re.IGNORECASE) else f"是{accounts[uid]}。"
+        f"是 QQ {uid}。" if verdict.get("show_account") is True else f"是{accounts[uid]}。"
     )
     return answer, usage

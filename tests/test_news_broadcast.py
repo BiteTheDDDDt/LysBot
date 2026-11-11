@@ -132,6 +132,7 @@ class NewsPayloadTests(unittest.TestCase):
                         "source_index": 4,
                         "published_at": "2026-08-26",
                         "summary": "游戏公司背景介绍。",
+                        "newsworthiness": 2,
                     },
                 ]
             },
@@ -184,15 +185,16 @@ class NewsPayloadTests(unittest.TestCase):
         self.assertEqual(items[0]["watch_for"], "")
         self.assertNotIn("[2]", items[0]["summary"])
 
-    def test_watch_for_requires_an_explicit_public_plan(self):
-        self.assertEqual(
-            news_broadcast._grounded_watch_for("官方是否会公布实际帧率"),
-            "",
+    def test_confirmed_followup_uses_structured_flag(self):
+        source = {"index": 1, "title": "开发商回应玩家提问", "site_name": "媒体",
+                  "url": "https://example.com/next", "published_at": "2026-08-26"}
+        item = {"source_index": 1, "summary": "开发商确认了下一次发布安排。",
+                "watch_for": "9月17日发布新版本", "watch_for_confirmed": True, "newsworthiness": 4}
+        result = news_broadcast.parse_native_news_selection(
+            json.dumps({"items": [item]}), [source], interest_label="游戏",
+            earliest_date=date(2026, 8, 25), latest_date=date(2026, 8, 26),
         )
-        self.assertEqual(
-            news_broadcast._grounded_watch_for("官方已宣布下一次发布将于9月17日举行"),
-            "官方已宣布下一次发布将于9月17日举行",
-        )
+        self.assertEqual(result[0]["watch_for"], item["watch_for"])
 
     def test_ranking_picks_strongest_hero_then_prefers_topic_diversity(self):
         items = [

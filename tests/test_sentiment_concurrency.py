@@ -69,7 +69,7 @@ class SentimentConcurrencyTests(unittest.IsolatedAsyncioTestCase):
                 self.analyzer.analyze("机器人别吵", 202, 9812, is_to_bot=True),
             ), 1)
             cached = await self.analyzer.analyze("机器人别吵", 303, 9812, is_to_bot=True)
-        expected = self.analyzer._rule_based_analysis("机器人别吵")
+        expected = ("neutral", 0.0)
         self.assertEqual([(r.sentiment_type, r.confidence) for r in [*results, cached]], [expected] * 3)
         self.assertTrue(stopped.is_set())
         self.assertEqual(call.await_count, 1)

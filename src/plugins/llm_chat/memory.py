@@ -994,7 +994,7 @@ class MemoryManager:
         )
         result = result.strip()
 
-        if not result or result.startswith("无") or result.startswith("没有"):
+        if not result:
             return []
 
         entries = _parse_scoped_important_info_entries(

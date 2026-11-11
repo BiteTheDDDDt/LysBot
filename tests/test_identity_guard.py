@@ -10,7 +10,7 @@ import nonebot
 nonebot.init()
 
 from src.plugins.llm_chat import agent_runner, models, tools
-from src.plugins.llm_chat.identity_guard import UNCERTAIN, is_identity_question, verify_identity
+from src.plugins.llm_chat.identity_guard import UNCERTAIN, verify_identity
 from src.plugins.llm_chat.memory import MemoryManager
 from src.plugins.llm_chat.retrieval import HistorySearch
 
@@ -92,6 +92,8 @@ class IdentityGuardTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(await self.verify(), "是RiverFox。")
         self.run.user_question = "R姐的QQ号是谁"
+        self.run.step.return_value = response({**self.verdict, "show_account": True,
+            "evidence_ids": ["h:0:messages:4"], "relation": "reply_address"})
         self.assertEqual(await self.verify(), "是 QQ 20202。")
 
     async def test_invalid_or_unrelated_account_and_citation_fail_closed(self):
@@ -110,7 +112,6 @@ class IdentityGuardTests(unittest.IsolatedAsyncioTestCase):
     async def test_only_plain_mentions_or_deleted_sources_cannot_verify(self):
         await self.lead("h:0:messages:2")
         self.assertEqual(await self.verify(), UNCERTAIN)
-        self.run.step.assert_not_awaited()
         await self.lead()
         await self.db.execute("DELETE FROM messages_detail WHERE id=1")
         await self.db.commit()
@@ -137,7 +138,9 @@ class IdentityGuardTests(unittest.IsolatedAsyncioTestCase):
         completions = AsyncMock(
             side_effect=[
                 make_response(FakeToolMessage([make_tool_call("a", "recall_history", {"exact_phrase": "R姐"})])),
-                make_response(FakeToolMessage([], content="一般指WrongBot")),
+                make_response(FakeToolMessage([], content=json.dumps({
+                    "response_mode": "factual", "verify_group_identity": True, "content": "一般指WrongBot",
+                }))),
                 response(self.verdict),
             ]
         )
@@ -219,32 +222,10 @@ class IdentityGuardTests(unittest.IsolatedAsyncioTestCase):
             current = agent_runner.AgentRunner("group_7")
             try:
                 await current.start([models.Message("user", "我是问本群那个", sender_id=10101)])
-                self.assertTrue(current.identity_question)
-                self.assertIn("本群R姐是谁", current.user_question)
-                self.assertIn("本轮纠正：我是问本群那个", current.user_question)
+                self.assertFalse(current.identity_question)
+                self.assertEqual(current.user_question, "我是问本群那个")
+                note = json.loads(current.transcript[-1]["content"].split("\n", 1)[1])[0]
+                self.assertEqual(note["question"], "本群R姐是谁")
                 self.assertIn("h:0:messages:1", current.evidence)
             finally:
                 await current.finish("complete")
-
-    def test_identity_trigger_does_not_match_ordinary_search_or_statistics(self):
-        self.assertTrue(is_identity_question("【群员-A】 本群R姐是谁"))
-        self.assertFalse(is_identity_question("统计本群今天的消息数"))
-        self.assertFalse(is_identity_question("查一下上次推荐的显卡价格"))
-
-    def test_identity_fallback_uses_current_utterance_not_author_or_quoted_question(self):
-        for text in (
-            "【群员-是谁还没发roc... QQ:10101】 什么派 我了解下",
-            "【群员-A】 [引用回复]\n被回复者：是谁还没发roc...\n原消息：软件模拟研究\n\n[当前消息]\n什么派 我了解下",
-            "【群员-A】 [引用回复]\n被回复者：乙\n原消息：R姐是谁\n\n[当前消息]\n你为什么这么说",
-            "【群员-A】 [引用回复]\n被回复者：是谁还没发roc...\n原消息：软件模拟研究",
-            "【群员-A】 [合并转发]\nQQ用户：R姐是谁",
-        ):
-            with self.subTest(text=text):
-                self.assertFalse(is_identity_question(text))
-        for text in (
-            "【群员-是谁还没发roc...】 本群R姐是谁",
-            "【群员-A】 [引用回复]\n被回复者：乙\n原消息：R姐说过\n\n[当前消息]\n她是哪个群友",
-            "【群员-A】 [引用回复]\n被回复者：乙\n原消息：旧问题\r\n\r\n[当前消息]\r\n本群谁叫R姐",
-        ):
-            with self.subTest(text=text):
-                self.assertTrue(is_identity_question(text))

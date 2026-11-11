@@ -66,51 +66,6 @@ MEME_CLASSIFICATION_RULES = (
     "is_meme 和 random_eligible 必须是不带引号的 true 或 false。"
 )
 
-STRICT_POSITIVE_HINTS = (
-    "表情包",
-    "梗图",
-    "沙雕图",
-    "反应图",
-    "聊天表情",
-    "典型的互联网",
-    "互联网沙雕",
-    "Q版头像",
-    "表情夸张",
-    "夸张的表情",
-    "搞笑表情",
-    "低分辨率",
-)
-
-STRICT_REJECT_HINTS = (
-    "社交媒体截图",
-    "社交媒体的截图",
-    "社交软件",
-    "个人资料截图",
-    "聊天截图",
-    "评论区",
-    "微博",
-    "帖子截图",
-    "文字截图",
-    "表格截图",
-    "清单",
-    "游戏界面",
-    "角色创建界面",
-    "卡牌界面",
-    "UI界面",
-    "广告海报",
-    "创意广告",
-    "票根",
-    "菜单",
-    "行情",
-    "价格信息",
-    "文档",
-    "网页",
-    "代码",
-    "食物照片",
-)
-
-REACTION_SUBJECT_RE = re.compile(r"(猫|猫咪|狗|狗狗|柴犬|人物|男性|女性|角色|头像|卡通|动漫|小猪|鸭子)")
-REACTION_EMOTION_RE = re.compile(r"(震惊|惊讶|无语|困惑|疑惑|无奈|呆滞|滑稽|委屈|开心|大笑|生气|嫌弃|严肃|心虚|崩溃|破防)")
 THOUGHT_PREFIX_RE = re.compile(r"^\s*<thought>\s*", re.IGNORECASE)
 JSON_TAIL_RE = re.compile(r"\{[^{}]*\"is_meme\"[^{}]*\}\s*$", re.DOTALL)
 
@@ -135,18 +90,6 @@ def clean_meme_memory_description(description: str, max_chars: int = 120) -> str
         line = re.sub(r"^[*\-\d\.\)\s]+", "", line).strip()
         if not line:
             continue
-        lowered = line.lower()
-        if lowered.startswith((
-            "the user wants",
-            "image analysis",
-            "analyze the image",
-            "describe the image",
-            "json",
-            "output",
-            "therefore",
-            "final output",
-        )):
-            continue
         line = re.sub(
             r"^\**\s*(image content|content|image|scene|subject|main subject|description|natural language description|画面内容|图片内容)\s*\**\s*[:：]\s*",
             "",
@@ -163,24 +106,6 @@ def clean_meme_memory_description(description: str, max_chars: int = 120) -> str
     if len(cleaned) > max_chars:
         cleaned = cleaned[:max_chars].rstrip() + "..."
     return cleaned
-
-
-def is_acceptable_meme_description(description: str) -> bool:
-    """保守判定一张已识别图片是否适合进入/留在表情包库。"""
-    text = (description or "").strip()
-    if not text:
-        return False
-
-    if any(hint in text for hint in STRICT_REJECT_HINTS):
-        return False
-
-    if any(hint in text for hint in STRICT_POSITIVE_HINTS):
-        return True
-
-    if REACTION_SUBJECT_RE.search(text) and REACTION_EMOTION_RE.search(text):
-        return True
-
-    return False
 
 
 class MemeManager:
@@ -279,8 +204,7 @@ class MemeManager:
             return None
         if meme_kind not in {"reaction", "joke"} or (type(text_sentence_count) is int and text_sentence_count >= 3):
             return None
-        if random_eligible is None and not is_acceptable_meme_description(description):
-            logger.info(f"[meme] 拒绝入库：描述未通过保守过滤 topic={topic} desc={(description or '')[:60]}")
+        if type(random_eligible) is not bool:
             return None
         memory_description = clean_meme_memory_description(description)
         if not memory_description:

@@ -36,52 +36,12 @@ from .roles import resolve_role
 AUTOMATED_NEWS_PREFIX = "【每日新闻播报】"
 NEWS_IMAGE_DIR = data_path("news_broadcasts")
 NEWS_CARD_GAP = 22
-LOW_QUALITY_NEWS_TITLE_MARKERS = (
-    "热点小时报",
-    "热点速递",
-    "今日热点汇总",
-    "每日热点汇总",
-    "开发商是谁",
-    "公司背景",
-    "制作团队介绍",
-    "游戏攻略",
-    "怎么玩",
-    "好玩吗",
-    "下载地址",
-    "兑换码",
-    "百科",
-)
-LOW_QUALITY_NEWS_HOSTS = {
-    "baijiahao.baidu.com",
-}
-LOW_QUALITY_NEWS_URL_MARKERS = (
-    "/dy/article/",
-)
 NEWS_SIGNAL_LABELS = (
     "明确进展",
     "风向变化",
     "争议升温",
     "数据变化",
 )
-NEWS_ACTION_MARKERS = (
-    "发布",
-    "公布",
-    "宣布",
-    "上线",
-    "开放",
-    "推出",
-    "确认",
-    "演示",
-    "获批",
-    "发售",
-    "首发",
-    "回应",
-    "起诉",
-    "增长",
-    "下降",
-)
-
-
 from .news_sources import publication_date as source_publication_date
 
 
@@ -89,19 +49,6 @@ def _clean_editorial_text(raw_value: object, limit: int) -> str:
     text = re.sub(r"\[\[?\d+(?:[,-]\d+)*\]?\]", "", str(raw_value or ""))
     text = re.sub(r"\s+", " ", text).strip()
     return text[:limit]
-
-
-def _normalize_news_signal(raw_value: object, headline: str) -> str:
-    value = str(raw_value or "").strip()
-    if value in NEWS_SIGNAL_LABELS:
-        return value
-    if any(marker in headline for marker in ("争议", "质疑", "反思", "回应", "起诉")):
-        return "争议升温"
-    if any(marker in headline for marker in ("营收", "销量", "用户", "增长", "下降", "数据")):
-        return "数据变化"
-    if any(marker in headline for marker in ("趋势", "转向", "调整", "收紧", "放宽")):
-        return "风向变化"
-    return "明确进展"
 
 
 def _coerce_newsworthiness(raw_value: object) -> int:
@@ -112,46 +59,14 @@ def _coerce_newsworthiness(raw_value: object) -> int:
     return max(1, min(value, 5))
 
 
-def _grounded_watch_for(raw_value: object) -> str:
-    """只保留报道中能够落到明确公开计划或时间点的后续节点。"""
-    text = _clean_editorial_text(raw_value, 140)
-    if not text:
-        return ""
-    if any(marker in text for marker in ("是否", "会否", "会不会", "能否", "可能")):
-        return ""
-    if not any(
-        marker in text
-        for marker in (
-            "将于",
-            "定于",
-            "计划于",
-            "预计于",
-            "即将",
-            "已宣布",
-            "已确定",
-            "下一次发布",
-        )
-    ):
-        return ""
-    return text
-
-
 def _news_item_score(item: dict, *, now: datetime) -> int:
-    """编辑排序分：新信息量优先，其次才是发布时间和来源信号。"""
-    headline = str(item.get("headline") or "")
-    source = str(item.get("source") or "")
+    """Rank by the editorial assessment and publication date."""
     score = _coerce_newsworthiness(item.get("newsworthiness")) * 10
-    if any(marker in headline for marker in NEWS_ACTION_MARKERS):
-        score += 7
-    if "官方" in source or "官方" in headline:
-        score += 4
     try:
         age_days = (now.date() - date.fromisoformat(str(item.get("published_at")))).days
     except ValueError:
         age_days = 2
     score += 6 if age_days <= 0 else 3 if age_days == 1 else 0
-    if item.get("why_it_matters"):
-        score += 3
     return score
 
 
@@ -660,7 +575,9 @@ def build_native_news_prompt(interest: dict, *, now: datetime) -> str:
         "不要自己填写原文标题、来源或 URL。summary 用中文客观概括一两句。"
         "editor_title 用不超过 26 个汉字提炼真正的新信息，禁止标题党。"
         "不要强行解释为什么群友应该关心，不要预测影响或添加期待和评价。"
-        "newsworthiness 按新信息量从 1 到 5 评分，背景性内容不得高于 2。"
+        "newsworthiness 按新信息量从 1 到 5 评分，背景性内容不得高于 2。仅选择至少 3 分的报道。"
+        "有报道明确公布的后续节点时可附 watch_for 和 watch_for_confirmed=true，其余省略。可附 signal，"
+        "从明确进展、风向变化、争议升温、数据变化中选贴合报道的一项。"
         "只输出严格 JSON，不要 markdown、引用标记或解释："
         '{"items":[{"source_index":1,"published_at":"YYYY-MM-DD","date_confirmed":true,"date_quote":"支持首发日期的原文短句",'
         '"editor_title":"事实型编辑标题","summary":"发生了什么",'
@@ -726,8 +643,6 @@ def parse_native_news_selection(
         source = source_by_index.get(source_index)
         published = _publication_date(source.get("published_at") if source else None)
         summary = _clean_editorial_text(raw_item.get("summary"), 240)
-        source_title = str(source.get("title") if source else "")
-        source_url = str(source.get("url") if source else "")
         source_host = (
             urlparse(str(source.get("url") if source else "")).netloc
             .lower()
@@ -737,16 +652,15 @@ def parse_native_news_selection(
             source is None
             or source_index in seen_indexes
             or source_host in seen_hosts
-            or source_host in LOW_QUALITY_NEWS_HOSTS
-            or any(marker in source_url.lower() for marker in LOW_QUALITY_NEWS_URL_MARKERS)
-            or any(marker in source_title for marker in LOW_QUALITY_NEWS_TITLE_MARKERS)
             or published is None
             or not (earliest_date <= published <= latest_date)
             or not summary
+            or _coerce_newsworthiness(raw_item.get("newsworthiness")) < 3
         ):
             continue
         seen_indexes.add(source_index)
         seen_hosts.add(source_host)
+        signal = raw_item.get("signal")
         items.append(
             {
                 "topic": interest_label[:40],
@@ -758,8 +672,9 @@ def parse_native_news_selection(
                 "why_it_matters": _clean_editorial_text(
                     raw_item.get("why_it_matters"), 180
                 ),
-                "watch_for": _grounded_watch_for(raw_item.get("watch_for")),
-                "signal": _normalize_news_signal(raw_item.get("signal"), source_title),
+                "watch_for": _clean_editorial_text(raw_item.get("watch_for"), 140)
+                if raw_item.get("watch_for_confirmed") is True else "",
+                "signal": signal if signal in NEWS_SIGNAL_LABELS else "",
                 "newsworthiness": _coerce_newsworthiness(
                     raw_item.get("newsworthiness")
                 ),

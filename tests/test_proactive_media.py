@@ -19,7 +19,7 @@ class ProactiveMediaTests(unittest.IsolatedAsyncioTestCase):
             meme = {'id': 1, 'topic': 'funny', 'description': '笑哭'}
             decision = PlannerDecision(parts=[ReplyPart('meme', 'funny')])
             bot = SimpleNamespace(self_id='999', send_group_msg=AsyncMock())
-            with patch.object(proactive.config, 'enable_proactive', True), patch.object(proactive.config, 'enable_sentiment_analysis', False), patch.object(proactive.config, 'proactive_msg_threshold', 1), patch.object(manager, 'is_on_planner_cooldown', return_value=False), patch.object(proactive, 'plan_chat_action', AsyncMock(return_value=decision)), patch.object(proactive, 'execute_planned_side_effect', AsyncMock()), patch.object(proactive, 'prepare_planned_meme', AsyncMock(return_value=meme if picked else None)), patch.object(manager, 'generate_proactive_response', AsyncMock()) as generate, patch.object(tools, 'send_picked_meme', AsyncMock(return_value='已发送' if sent else '发送失败')) as send, patch.object(tools, 'get_last_sent_meme', return_value=meme), patch.object(proactive.memory_manager, 'add_message', AsyncMock()) as save:
+            with patch.object(proactive.config, 'enable_proactive', True), patch.object(proactive.config, 'enable_sentiment_analysis', False), patch.object(proactive.config, 'proactive_msg_threshold', 1), patch.object(manager, 'is_on_planner_cooldown', return_value=False), patch.object(proactive, 'plan_chat_action', AsyncMock(return_value=decision)), patch.object(proactive, 'execute_planned_side_effect', AsyncMock()), patch.object(proactive, 'prepare_planned_meme', AsyncMock(return_value=meme if picked else None)), patch.object(manager, 'generate_proactive_response', AsyncMock()) as generate, patch.object(tools, 'send_picked_meme', AsyncMock(return_value=tools.ToolDeliveryResult('表情包', 'sent' if sent else 'failed'))) as send, patch.object(tools, 'get_last_sent_meme', return_value=meme), patch.object(proactive.memory_manager, 'add_message', AsyncMock()) as save:
                 result = await manager.try_proactive(bot, 99, '夫目前犯的背德感', user_id=42)
             self.assertEqual(result, sent)
             generate.assert_not_awaited()
@@ -73,7 +73,7 @@ class ProactiveMediaTests(unittest.IsolatedAsyncioTestCase):
                 decision = _normalize_decision({'action': 'poke', 'parts': [], 'poke_target_id': '999'}, 'silent', 'proactive')
                 self.assertEqual(decision.parts, [])
                 bot = SimpleNamespace(self_id='999', send_group_msg=AsyncMock())
-                result_text = '戳一戳已发送给 42' if success else '戳一戳失败：接口不可用'
+                result_text = tools.ToolDeliveryResult('戳一戳结果', 'sent' if success else 'failed')
                 with patch.object(proactive.config, 'enable_proactive', True), patch.object(proactive.config, 'enable_sentiment_analysis', False), patch.object(proactive.config, 'proactive_msg_threshold', 1), patch.object(proactive.config, 'proactive_cooldown', 60), patch.object(manager, 'is_on_planner_cooldown', return_value=False), patch.object(proactive, 'plan_chat_action', AsyncMock(return_value=decision)), patch.object(tools, 'send_poke', AsyncMock(return_value=result_text)) as poke, patch.object(manager, 'generate_proactive_response', AsyncMock()) as generate, patch.object(proactive.memory_manager, 'add_message', AsyncMock()) as save:
                     result = await manager.try_proactive(bot, 99, '又被自己蠢笑了', user_id=42)
                     self.assertEqual(result, success)

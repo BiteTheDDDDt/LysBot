@@ -1,6 +1,5 @@
 """聊天处理核心逻辑"""
 import json
-import re
 import asyncio
 import time
 from collections import OrderedDict
@@ -31,7 +30,7 @@ from .reply_policy import (
 from .planner import PlannerDecision, execute_planned_side_effect, plan_chat_action
 from .proactive import proactive_manager
 from .repeat import TEXT_ONLY as REPEAT_TEXT_ONLY, repeat_manager
-from .turns import is_meme_only, prepare_planned_meme, send_response_turn, wants_meme
+from .turns import is_meme_only, prepare_planned_meme, send_response_turn
 from .utils import clean_response
 from .sentiment import sentiment_analyzer
 from .conversation import (
@@ -555,42 +554,6 @@ def _drop_current_turn_from_history(
     return [msg for idx, msg in enumerate(history) if idx not in remove_indices]
 
 
-# ===== 防提示词注入过滤 =====
-INJECTION_PATTERNS = [
-    # English patterns
-    r'^debug\s*mode\s*:',
-    r'^developer\s*(mode)?\s*:',
-    r'^ignore\s+(previous\s+)?instructions',
-    r'^ignore\s+all\s+(previous\s+)?(instructions\s*)?',
-    r'^system\s*:',
-    r'^you\s+are\s+now\s+',
-    r'^act\s+as\s+',
-    r'^pretend\s+(to\s+be\s+)?',
-    r'^simulation\s*:',
-    r'^new\s+system\s*:',
-    r'^override\s+(system\s+)?(instructions?)?\s*:',
-    r'^disregard\s+(previous\s+)?instructions',
-    r'^forget\s+(everything\s+)?(about\s+)?(your\s+)?(instructions?|system)\s*:',
-    r'^set\s+system\s*:',
-    r'^in\s+\[INST\]\s*',
-    r'^<<SYS>>',
-    r'^\[SYSTEM\]',
-    r'^根 据 你 的 内部指令',
-    # Chinese patterns
-    r'^你现在是',
-    r'^请扮演',
-    r'^忽略之前的',
-    r'^无视之前的',
-    r'^取消之前的',
-    r'^系统设定\s*:',
-    r'^系统指令\s*:',
-    r'^你是',
-    r'^从现在开始你是',
-    r'^我要你扮演',
-    r'^我希望你扮演',
-]
-
-
 async def process_aggregated_messages(bot: Bot, group_id: int):
     buffer = aggregation_buffers.get(group_id)
     if not buffer or not buffer.messages:
@@ -692,25 +655,6 @@ async def add_to_aggregation_buffer(bot: Bot, event: GroupMessageEvent,
     buffer.wakeup.set()
     if buffer.task is None or buffer.task.done():
         buffer.task = asyncio.create_task(delayed_process(bot, group_id), name=f"aggregation-{group_id}")
-
-
-def sanitize_input(user_message: str) -> str:
-    """过滤用户消息中的提示词注入尝试。"""
-
-    original = user_message
-
-    for pattern in INJECTION_PATTERNS:
-        if re.search(pattern, user_message, re.IGNORECASE):
-            # 用占位符替换，而非直接拒绝
-            user_message = re.sub(pattern, '[内容已过滤] ', user_message, flags=re.IGNORECASE, count=1)
-            logger.warning(f"[防注入] 检测到可疑模式: {pattern}")
-            # 只处理第一个匹配，避免用户猜出规则
-            break
-
-    if user_message != original:
-        logger.info(f"[防注入] 原始消息: {original[:50]}... -> 过滤后: {user_message[:50]}...")
-
-    return user_message
 
 
 # ===== 消息记录 =====
@@ -1730,13 +1674,12 @@ class PreparedIncomingMessage:
 
 
 async def prepare_incoming_message(bot: Bot, event: MessageEvent) -> PreparedIncomingMessage:
-    """Expand, sanitize and download one event exactly once per matcher."""
+    """Expand and download one event exactly once per matcher."""
     resolved = await resolve_incoming_message(bot, event)
     ensure_current_session()
 
     plain_text = resolved.response_text if resolved.response_text is not None else resolved.plain_text
     _, plain_text = extract_trigger_word(plain_text)
-    plain_text = sanitize_input(plain_text)
 
     downloaded = await download_images_as_base64(resolved.image_urls)
     ensure_current_session()
@@ -2062,12 +2005,6 @@ async def _do_handle_single_chat(bot: Bot, event: MessageEvent, message: str,
         ):
             return
 
-        # 如果本轮会发表情包，且文字只是 meta 废话，丢弃文字（只发表情）
-        from .utils import is_meta_meme_filler
-        if planned_meme and wants_meme(planner_decision) and is_meta_meme_filler(cleaned_response):
-            logger.info(f"[meme] 过滤废话文字回复: {cleaned_response!r}")
-            cleaned_response = ""
-
         async def send_text_reply(text: str, is_first: bool) -> None:
             payload = _build_targeted_reply_message(event, text, group_message_order) if is_first else text
             ensure_send_allowed(group_id)
@@ -2355,12 +2292,6 @@ async def _do_handle_merged_chat(
             model_spec=getattr(response_text, "model_spec", None),
         ):
             return
-
-        # 如果本轮会发表情包，且文字只是 meta 废话，丢弃文字（只发表情）
-        from .utils import is_meta_meme_filler
-        if planned_meme and wants_meme(planner_decision) and is_meta_meme_filler(cleaned_response):
-            logger.info(f"[meme] 过滤废话文字回复: {cleaned_response!r}")
-            cleaned_response = ""
 
         # 发送回复（使用 bot.send 而不是 finish，因为不是在 matcher 中）
         async def send_text_reply(text: str, is_first: bool) -> None:

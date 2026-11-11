@@ -16,24 +16,13 @@ from .sentiment import sentiment_analyzer
 from .context_builder import build_context_messages
 from .reply_policy import PROACTIVE_REPLY, constrain_plan, enforce_reply_budget
 from .planner import PlannerDecision, execute_planned_side_effect, plan_chat_action
-from .turns import is_meme_only, prepare_planned_meme, send_response_turn, wants_meme
+from .turns import is_meme_only, prepare_planned_meme, send_response_turn
 from .conversation import ensure_send_allowed, invalidate, serialized_turn
 
 # Internal participation tuning; not operator-facing settings.
 IDLE_THRESHOLD_SECONDS = 3600
 CHECK_WINDOW_SECONDS = 180
 PLANNER_COOLDOWN_SECONDS = 60
-# Contemplative/negative topics that justify an unsolicited check-in.
-CONVERSATION_KEYWORDS = (
-    "意义", "存在", "无聊", "空虚",
-    "痛苦", "难受", "烦恼",
-    "放弃", "放下", "想死",
-    "累", "疲惫", "绝望",
-)
-KEYWORD_TRIGGER_PROBABILITY = 0.1
-
-
-
 @dataclass
 class RecentMessage:
     """最近消息记录"""
@@ -233,20 +222,6 @@ class ProactiveManager:
         """重置计数器"""
         self.msg_counters[group_id] = 0
 
-    def check_keywords(self, message: str) -> bool:
-        """检查消息是否包含关键词"""
-        message_lower = message.lower()
-        for keyword in CONVERSATION_KEYWORDS:
-            if keyword in message_lower:
-                return True
-        return False
-
-    def should_trigger_by_keyword(self) -> bool:
-        """检查是否应该通过关键词触发（兜底机制）"""
-        return random.random() < KEYWORD_TRIGGER_PROBABILITY
-
-
-
     async def generate_proactive_response(
         self,
         group_id: int,
@@ -368,7 +343,7 @@ class ProactiveManager:
 
         count = self.msg_counters.get(group_id, 0)
 
-        # 判断触发条件：1. 消息达到阈值(5条) 2. 达到空闲阈值(30分钟) 3. 关键词触发(概率)
+        # 消息数量或空闲时间决定何时请 planner 评估。
         should_judge = False
         trigger_reason = ""
 
@@ -378,9 +353,6 @@ class ProactiveManager:
         elif count >= config.proactive_msg_threshold:
             should_judge = True
             trigger_reason = f"消息计数达到 {count} 条"
-        elif self.check_keywords(message) and self.should_trigger_by_keyword():
-            should_judge = True
-            trigger_reason = "关键词触发"
         elif self.is_idle(group_id):
             should_judge = True
             trigger_reason = "群聊空闲检测"
@@ -460,7 +432,6 @@ class ProactiveManager:
                     set_voice_context,
                     voice_was_sent_this_round,
                 )
-                from .utils import is_meta_meme_filler
 
                 set_poke_context(group_id=group_id, user_id=user_id, bot=bot)
                 set_meme_context(group_id=group_id, user_id=user_id, bot=bot)
@@ -474,7 +445,7 @@ class ProactiveManager:
                             return False
                         planner_decision.poke_target_id = "sender"
                         poke_result = await execute_planned_side_effect(planner_decision)
-                        poke_sent = poke_result.startswith("戳一戳已发送给 ")
+                        poke_sent = getattr(poke_result, "delivery_status", None) == "sent"
                         if not poke_sent:
                             logger.warning(f"[主动戳一戳] 未发送 group={group_id}: {poke_result}")
                             return False
@@ -572,10 +543,6 @@ class ProactiveManager:
                         # 清理回复内容
                         generated_response = response
                         response = clean_response(response or "")
-                        if planned_meme and wants_meme(planner_decision) and is_meta_meme_filler(response):
-                            logger.info(f"[meme] 主动发言过滤废话文字回复: {response!r}")
-                            response = ""
-
                         async def send_text_reply(text: str, is_first: bool) -> None:
                             ensure_send_allowed(group_id)
                             from .agent_runner import deliver_reply as _deliver_agent_reply
