@@ -58,6 +58,20 @@ class KnowledgeTests(unittest.TestCase):
             offset = page["next_offset"]
         self.assertEqual("".join(content), self.path.read_text(encoding="utf-8"))
 
+    def test_image_refs_only_resolve_local_document_attachments(self):
+        (self.root.parent / "outside.png").write_bytes(b"private")
+        (self.root / "ref.png").write_bytes(b"reference image")
+        self.path.write_text("# 角色\n![合法参考](ref.png)\n![越界](../outside.png)\n![远程](https://example.test/ref.png)\n", encoding="utf-8")
+        doc = self.store.search("角色")["items"][0]["document_id"]
+        refs = self.store.read(doc)["items"][0]["image_refs"]
+        self.assertEqual([ref["alt"] for ref in refs], ["合法参考"])
+        self.assertEqual(base64.b64decode(self.store.image_base64(refs[0]["id"])), b"reference image")
+        with self.assertRaises(ValueError):
+            self.store.image_base64(refs[0]["id"].rsplit(":", 1)[0] + ":1")
+        self.path.write_text("# 更新后的角色", encoding="utf-8")
+        with self.assertRaises(ValueError):
+            self.store.image_base64(refs[0]["id"])
+
     def test_revision_and_restored_evidence_require_current_document(self):
         doc = self.store.search("LysBot")["items"][0]["document_id"]
         item = self.store.read(doc)["items"][0]

@@ -1,6 +1,8 @@
 import asyncio
 import base64
 import json
+import tempfile
+from pathlib import Path
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -105,6 +107,37 @@ class ImageReferenceTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(request.url.path.endswith("/images/edits"))
             self.assertIn(PNG,request.content)
             self.assertIn(b'name="image[]"',request.content)
+
+    async def test_knowledge_attachment_flows_through_image_edit_request(self):
+        requests = []
+
+        def handler(request):
+            requests.append(request)
+            return httpx.Response(200, json={"data": [{"b64_json": ENCODED}]})
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "phos.md").write_text("# 磷叶石\n![角色参考](phos.png)\n", encoding="utf-8")
+            (root / "phos.png").write_bytes(PNG)
+            tools.set_image_context(None, 42, self.bot)
+            async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+                async def generate(prompt, **kwargs):
+                    return await image_generation.image_generation_manager.generate(prompt, client=client, **kwargs)
+                with (
+                    patch.object(config, "knowledge_dir", directory),
+                    patch.object(image_generation, "generate_image", side_effect=generate),
+                    patch.object(image_generation.image_generation_manager, "_resolve_candidates",
+                                 return_value=("cliproxyapi:gpt-image-test", ["cliproxyapi:gpt-image-test"])),
+                ):
+                    found = json.loads(await tools.search_knowledge("磷叶石"))
+                    read = json.loads(await tools.read_knowledge(found["items"][0]["document_id"]))
+                    reference = read["items"][0]["image_refs"][0]
+                    result = json.loads(await tools.generate_image("磷叶石穿雨衣", reference_image_ids=[reference["id"]]))
+        self.assertEqual(result["status"], "sent")
+        self.assertEqual(len(requests), 1)
+        self.assertTrue(requests[0].url.path.endswith("/images/edits"))
+        self.assertIn(PNG, requests[0].content)
+        self.assertIn("磷叶石穿雨衣".encode(), requests[0].content)
 
     async def test_tool_selects_history_original_and_retains_generated_image(self):
         historical = image_reference_store.remember("user_42", ENCODED, "上一轮原图")

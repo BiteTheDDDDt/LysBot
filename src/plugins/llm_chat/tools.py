@@ -599,9 +599,19 @@ async def generate_image(
     if len(reference_image_ids) > max(1, int(config.incoming_images_limit)):
         return MediaValidationFailure("参考图片过多，请明确选择需要的原图")
     references = ctx.get("references", {})
-    if any(ref_id not in references for ref_id in reference_image_ids):
-        return MediaValidationFailure("所选原图已过期或不属于当前会话，请用户引用或重发图片；不能仅凭文字描述重画。")
-    originals = [references[ref_id].base64 for ref_id in reference_image_ids]
+    originals = []
+    for ref_id in reference_image_ids:
+        if ref_id in references:
+            originals.append(references[ref_id].base64)
+        elif ref_id.startswith("ki:") and config.knowledge_dir.strip():
+            from .knowledge import KnowledgeStore
+            try:
+                original = await asyncio.to_thread(KnowledgeStore(config.knowledge_dir).image_base64, ref_id)
+            except (OSError, ValueError):
+                return MediaValidationFailure("知识库参考图不可用，请重新读取角色资料并选用有效的图片引用。")
+            originals.append(original)
+        else:
+            return MediaValidationFailure("所选原图已过期或不属于当前会话，请用户引用或重发图片；不能仅凭文字描述重画。")
 
     scope_key = f"group:{group_id}" if group_id else f"private:{user_id}"
     cooldown = max(0.0, float(config.image_gen_cooldown))
