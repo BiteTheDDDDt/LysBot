@@ -15,6 +15,7 @@ from .card_renderer import (
 from .model_identity import format_model_spec_label
 
 MEMBER_LIMIT = 5
+BRIEFING_TITLE = "今日博物志"
 
 
 def briefing_member_section(data):
@@ -98,7 +99,7 @@ def build_card(template, data, *, group_name, group_id, date_label, activity_tex
         if stats:
             blocks.append(CardBlock("AI 调用统计", format_usage_lines(stats), accent=ACCENT_BLUE, body_size=23))
         return CardDocument(
-            data.get("title") or "今日群聊简报",
+            BRIEFING_TITLE,
             label,
             blocks,
             data.get("subtitle") or "过去 24 小时群聊速览",

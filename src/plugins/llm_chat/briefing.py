@@ -34,7 +34,7 @@ BRIEFING_IMAGE_DIR = data_path("briefings")
 # A quiet group is not briefed; this is a fixed guard, not an operator knob.
 BRIEFING_MIN_MESSAGES = 200
 from .card_renderer import SVG_WIDTH as SVG_WIDTH, _get_font as _get_font, wrap_text_pixel as wrap_text_pixel, save_card_image
-from .card_templates import render_card, format_usage_lines, briefing_member_section, MEMBER_LIMIT
+from .card_templates import BRIEFING_TITLE, render_card, format_usage_lines, briefing_member_section, MEMBER_LIMIT
 
 TOPIC_LIMIT = 5
 BRIEFING_ART_SIZE = (1600, 900)
@@ -154,7 +154,7 @@ def parse_briefing_payload(raw_text: str, *, source_messages=None) -> dict:
                     raise
             if isinstance(data, dict) and isinstance(data.get("topics"), list) and any(isinstance(t, str) and t.strip() for t in data["topics"]):
                 return {
-                    "title": str(data.get("title") or "今日群聊简报").strip(),
+                    "title": BRIEFING_TITLE,
                     "subtitle": str(data.get("subtitle") or data.get("mood") or "过去 24 小时群聊速览").strip(),
                     "topics": [item.strip() for item in data["topics"] if isinstance(item, str) and item.strip()],
                     "active_members": _parse_members(data.get("active_members") or data.get("activePlayers") or [], source_messages),
@@ -192,7 +192,7 @@ def parse_briefing_payload(raw_text: str, *, source_messages=None) -> dict:
     if not topics:
         raise ValueError("briefing_payload_invalid: no usable topics")
     return {
-        "title": "今日群聊简报",
+        "title": BRIEFING_TITLE,
         "subtitle": "过去 24 小时群聊速览",
         "topics": topics,
         "active_members": _parse_members(active_members, source_messages),
@@ -212,7 +212,7 @@ def build_briefing_text(card_data: dict) -> str:
     briefing_model = card_data.get("briefing_model")
 
     parts = [
-        f"📋 {card_data.get('title') or '今日群聊简报'}",
+        f"📋 {BRIEFING_TITLE}",
         subtitle,
     ]
     if briefing_model:
@@ -612,7 +612,6 @@ async def _send_daily_briefing_impl(
                     "只允许输出一个 JSON 对象，不要输出 markdown 代码块、解释或额外文字。\n\n"
                     "JSON 结构如下：\n"
                     "{\n"
-                    '  "title": "今日群聊简报",\n'
                     '  "subtitle": "一句 10-24 字的副标题，概括全天氛围",\n'
                     '  "topics": ["带细节的话题1", "带细节的话题2", "带细节的话题3", "可选话题4", "可选话题5"],\n'
                     '  "active_members": [{"user_id":123,"personality_tag":"当天动态生成的人格标签","comment":"基于本人当日发言的短评","source_ids":[原消息ID]}],\n'

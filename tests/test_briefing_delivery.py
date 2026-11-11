@@ -40,6 +40,16 @@ class BriefingAttemptTests(unittest.TestCase):
 
 
 class BriefingRenderTests(unittest.TestCase):
+    def test_briefing_title_is_shared_by_card_and_text_even_with_legacy_data(self):
+        from src.plugins.llm_chat.card_templates import build_card
+
+        legacy = {"title": "今日群聊简报", "topics": ["聊了旧掌机"]}
+        data = briefing.parse_briefing_payload(json.dumps(legacy, ensure_ascii=False))
+        self.assertEqual(data["title"], "今日博物志")
+        card = build_card("briefing", legacy, group_name="测试", group_id=1, date_label="今天")
+        self.assertEqual(card.title, "今日博物志")
+        self.assertEqual(briefing.build_briefing_text(legacy).splitlines()[0], "📋 今日博物志")
+
     def test_reference_pool_pairs_different_episodes_and_is_stable_for_retries(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
