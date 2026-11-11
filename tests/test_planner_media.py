@@ -13,31 +13,17 @@ from src.plugins.llm_chat.tools import get_chat_tools
 
 
 class PlannerMediaTests(unittest.IsolatedAsyncioTestCase):
-    async def test_explicit_reference_edit_is_not_downgraded_to_text(self):
+    async def test_message_wording_does_not_override_planner_output(self):
         with (
             patch.object(planner.memory_manager, "get_recent_session_messages", AsyncMock(return_value=[])),
             patch.object(planner.model_manager, "chat", AsyncMock(return_value='{"action":"reply","parts":[{"type":"text"}]}')),
         ):
-            for message in [
-                "参考这个图片，生成一个修改背景的版本", "把这张图的衣服换成红色",
-                "[引用回复]\n原消息：[图片]\n\n[当前消息]\n参考这个图片，生成一个修改背景的版本",
-                "【群员-甲】 参考这张图，生成一个修改背景的版本",
-            ]:
-                decision = await planner.plan_chat_action(
-                    session_id="user_42", group_id=0, current_message=message, is_direct=True, has_images=True,
-                )
-                self.assertEqual(decision.required_tool, "generate_image")
-
-    def test_reference_discussion_and_negated_edits_do_not_force_generation(self):
-        for message in ["怎么参考这张图修改背景？", "不要把这张图改成红色", "参考这张图，但不要修改背景", "评价一下这张图片"]:
-            self.assertEqual(planner._explicit_required_tool(message), "")
-
-    def test_quoted_media_requests_are_data_not_current_instructions(self):
-        for message in [
-            "[引用回复]\n原消息：生成一张图片\n\n[当前消息]\n这句话什么意思？",
-            "[合并转发]\n甲: 生成一张图片",
-        ]:
-            self.assertEqual(planner._explicit_required_tool(message), "")
+            for message in ["发个自拍", "把这张图的衣服换成红色", "给我来段语音"]:
+                with self.subTest(message=message):
+                    decision = await planner.plan_chat_action(
+                        session_id="user_42", group_id=0, current_message=message, is_direct=True,
+                    )
+                    self.assertEqual([part.type for part in decision.parts], ["text"])
 
     def test_planner_log_preview_keeps_recent_context_visible(self):
         prompt = (
@@ -261,20 +247,6 @@ class PlannerMediaTests(unittest.IsolatedAsyncioTestCase):
             [(part.type, part.topic) for part in decision.parts],
             [("meme", "shock"), ("text", "")],
         )
-
-    def test_explicit_media_fallback_avoids_capability_questions(self):
-        self.assertEqual(
-            planner._explicit_required_tool("你生成个图片"),
-            "generate_image",
-        )
-        self.assertEqual(
-            planner._explicit_required_tool("给我来段语音"),
-            "send_voice",
-        )
-        self.assertEqual(planner._explicit_required_tool("你会生成图片吗"), "")
-        self.assertEqual(planner._explicit_required_tool("不要生成图片"), "")
-        self.assertEqual(planner._explicit_required_tool("发个自拍"), "generate_image")
-        self.assertEqual(planner._explicit_required_tool("他发了个自拍"), "")
 
     async def test_planner_output_exposes_required_tool(self):
         with (

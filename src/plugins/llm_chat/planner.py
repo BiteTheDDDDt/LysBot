@@ -309,51 +309,6 @@ async def _resolve_planner_context(
     return _strip_current_from_fallback(fallback, current_message)
 
 
-def _explicit_required_tool(message: str) -> str:
-    """High-precision fallback for unambiguous media commands.
-
-    The planner remains responsible for semantic/implicit requests. These
-    patterns only prevent obvious commands such as ``生成个图片`` from being
-    downgraded to a text acknowledgement when the planner omits the field.
-    """
-    current = str(message or "")
-    if "[当前消息]\n" in current:
-        current = current.rsplit("[当前消息]\n", 1)[1]
-    elif current.startswith(("[引用回复]", "[合并转发]", "[合并转发预览]")):
-        return ""
-    current = re.sub(r"^【群员-[^】]+】\s*", "", current)
-    text = " ".join(current.split()).strip()
-    if not text:
-        return ""
-    if re.search(r"(?:不要|别|不用|无需).{0,8}(?:生成|画|做|发|录|念|读|改|编辑|换)", text):
-        return ""
-    if re.search(
-        r"(?:(?:你)?(?:会|支持|具备)|会不会|是否支持|支不支持|有没有)"
-        r".{0,8}(?:生成图片|生图|画图|发语音|语音).{0,3}(?:吗|么|\?|？)?$",
-        text,
-    ):
-        return ""
-
-    image_patterns = (
-        r"^(?:请|麻烦|你|给我){0,3}(?:发|拍|来)(?:一)?(?:个|张)?(?:你(?:自己)?的)?自拍(?:给我(?:看)?|看看|看)?[吧嘛呗呢！!？?。~～ ]*$",
-        r"(?:帮我|给我|替我|请你|麻烦你)?(?:生成|画|做)(?:一|个|张|幅|套)?(?:个|张|幅)?(?:图片|图|画|画像|头像|壁纸|海报)",
-        r"(?:给我|发我|来)(?:一|个|张|幅)?(?:个|张|幅)?(?:图片|图|画|画像|头像|壁纸|海报|自拍|照片)",
-        r"^(?:请|帮我)?(?:参考|参照|基于|照着)(?:这|那|上|一|两|几|张|幅|个|面|的){0,6}(?:图片|图|照片).{0,24}(?:生成|画|改成|修改)",
-        r"^(?:请|帮我)?(?:把|将)(?:这|那|上|一|张|幅|个|面|的){0,6}(?:图片|图|照片).{0,24}(?:改成|换成|修改|去掉|替换)",
-    )
-    if any(re.search(pattern, text) for pattern in image_patterns):
-        return "generate_image"
-
-    voice_patterns = (
-        r"(?:给我|发我|来|录|生成)(?:一|个|段|条)?(?:个|段|条)?语音",
-        r"(?:用语音|语音)(?:说|讲|念|读|回复)",
-        r"(?:念|读)(?:给我听|出来听听)",
-    )
-    if any(re.search(pattern, text) for pattern in voice_patterns):
-        return "send_voice"
-    return ""
-
-
 def _fallback_parts(action: str, mode: str) -> list[ReplyPart]:
     if action in NON_REPLY_ACTIONS:
         return []
@@ -648,6 +603,7 @@ async def plan_chat_action(
 - 严肃求助、精确信息、敏感情绪或表情包会削弱表达时只用 text。
 - meme 的 topic 必须是 happy、sad、angry、funny、shock、cute 之一。
 - 用户明确要求生成图片、参考原图绘制或编辑已有图片（如“参考这张图修改背景”“把刚才那张图的衣服换成红色”），或提出只有视觉作品才能满足的请求（如“给我看你的自拍”“想看你穿汉服的样子”），parts 第一项用 image。
+- 判断当前发言者是否在请 bot 现在交付媒体。结合被回复者、当前消息和上下文理解省略和指代；历史或转发里提到的请求、对能力的询问、讨论已有图片都不构成当前媒体任务。群友用玩笑口吻直接索要自拍时，仍按图片请求处理。
 - 用户明确索要语音，或提出只有听到声音才能满足的请求（如“用语音说”“念给我听”“哄我睡觉”），parts 第一项用 voice。
 - 声音意图与能力边界：{VOICE_INTENT_POLICY}
 - 仅讨论图片/语音、评价已有图片、询问“你会不会生成图片/发语音”时，不要放 image/voice。
@@ -742,18 +698,6 @@ wait_seconds 上限 {config.planner_wait_max_seconds}。情绪提示：{mood_hin
             target = payload.get("followup_target") if isinstance(payload, dict) else None
             if target != "bot" or not isinstance(evidence, str) or not evidence.strip():
                 decision = PlannerDecision(action="silent", reason="未确认当前消息在回应 bot 的具体发言", parts=[])
-        explicit_tool = _explicit_required_tool(current_message)
-        if explicit_tool and (is_direct or decision.should_continue) and decision.required_tool != explicit_tool:
-            decision.parts = [
-                ReplyPart(TOOL_TO_MEDIA_PART[explicit_tool])
-            ]
-            decision.topic_state = "active"
-            if decision.action != "reply":
-                decision.action = "reply"
-            logger.info(
-                f"[planner] 明确媒体命令兜底 required_tool={explicit_tool} "
-                f"message={current_message[:80]!r}"
-            )
         if mode == "proactive" and decision.should_continue:
             contribution = _coerce_str(payload, "proactive_contribution")
             if payload.get("proactive_value") not in {"social_reaction", "new_angle", "useful_info", "support"} or not contribution:

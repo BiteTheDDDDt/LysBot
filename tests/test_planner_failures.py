@@ -14,11 +14,9 @@ class PlannerFailureTests(unittest.IsolatedAsyncioTestCase):
         for request in ['你好', '生成一张图片', '根据群友印象生成一张素人自拍九宫格照片']:
             with patch.object(planner, '_resolve_planner_context', AsyncMock(return_value='')), \
                  patch.object(planner.config, 'enable_sentiment_analysis', False), \
-                 patch.object(planner.model_manager, 'chat', AsyncMock(side_effect=asyncio.TimeoutError)), \
-                 patch.object(planner, '_explicit_required_tool') as fallback:
+                 patch.object(planner.model_manager, 'chat', AsyncMock(side_effect=asyncio.TimeoutError)):
                 with self.assertRaises(asyncio.TimeoutError):
                     await planner.plan_chat_action(session_id='group_77', group_id=77, current_message=request)
-                fallback.assert_not_called()
 
     async def test_invalid_planner_output_aborts_instead_of_using_default_action(self):
         for result in ['', '已生成九宫格', '{}', '{"action":"unknown"}']:
