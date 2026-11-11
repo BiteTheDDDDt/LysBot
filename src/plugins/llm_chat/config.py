@@ -137,7 +137,8 @@ class Config(BaseModel):
     enable_daily_briefing: bool = False
     briefing_time: str = "00:00"  # 触发时间 HH:MM
     briefing_context_max_chars: int = 40000
-    briefing_enable_portrait: bool = True  # 群像插画嵌入简报，不另发图片
+    briefing_enable_portrait: bool = True  # 群像和漫画嵌入简报
+    briefing_reference_documents: dict[str, list[str]] = {}
     briefing_portrait_timeout: float = 240  # 生图整条回退链的总等待上限
 
     # 每日新闻播报配置

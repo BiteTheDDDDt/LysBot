@@ -6,7 +6,7 @@ import sqlite3
 from contextlib import closing
 from io import BytesIO
 import unittest
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -40,6 +40,29 @@ class BriefingAttemptTests(unittest.TestCase):
 
 
 class BriefingRenderTests(unittest.TestCase):
+    def test_reference_pool_pairs_different_episodes_and_is_stable_for_retries(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            paths = {}
+            for kind, episodes in {"ensemble": [5], "interaction": [5, 6], "comic": [1, 2]}.items():
+                (root / kind).mkdir()
+                paths[kind] = []
+                for episode in episodes:
+                    path = f"{kind}/ep{episode}.md"
+                    paths[kind].append(path)
+                    (root / path).write_text(f"![参考](ep{episode}.png)\n", encoding="utf-8")
+                    with Image.new("RGB", (2, 2), (episode, len(kind), 0)) as image:
+                        image.save((root / path).with_suffix(".png"))
+            with patch.object(briefing.config, "knowledge_dir", directory), patch.object(
+                briefing.config, "briefing_reference_documents", paths,
+            ):
+                day = date(2026, 11, 12)
+                anime = briefing._briefing_references("anime", 123, day)
+                self.assertEqual(anime, briefing._briefing_references("anime", 123, day))
+                for encoded, path in zip(anime, ("ensemble/ep5.png", "interaction/ep6.png"), strict=True):
+                    self.assertEqual(base64.b64decode(encoded), (root / path).read_bytes())
+                self.assertEqual(len(briefing._briefing_references("comic", 123, day)), 2)
+
     def test_portrait_budget_counts_serialization_and_preserves_scene(self):
         import json
         scene = '群友围着“2.0”音箱争论，另一人举起写有"-0.41%"的手机。'
@@ -68,7 +91,7 @@ class BriefingRenderTests(unittest.TestCase):
         self.assertEqual(material["话题1"], card["topics"][0])
         self.assertEqual(material["人物行动1"], card["active_members"][0])
 
-    def test_member_grid_keeps_order_and_removes_closing_section(self):
+    def test_member_comic_uses_actual_count_and_removes_closing_section(self):
         atlas = Image.new("RGB", (200, 200))
         draw = ImageDraw.Draw(atlas)
         colors = ["red", "green", "blue", "yellow"]
@@ -85,6 +108,11 @@ class BriefingRenderTests(unittest.TestCase):
         self.assertEqual(block.entries, [])
         prompt = briefing.build_member_portrait_prompt({"active_members": members})
         self.assertIn("特质", prompt)
+        self.assertIn("16:9", prompt)
+        self.assertIn("4个分镜", prompt)
+        three = briefing.build_member_portrait_prompt({"active_members": members[:3]})
+        self.assertIn("3个分镜", three)
+        self.assertNotIn(members[3]["name"], three)
         for member in members:
             self.assertIn(member["name"], prompt)
             self.assertIn(member["comment"], prompt)
@@ -272,11 +300,26 @@ class BriefingDeliveryTests(unittest.IsolatedAsyncioTestCase):
         card = briefing.parse_briefing_payload('{"topics":["显卡"],"portrait_prompt":"三位虚构群友围着显卡讨论"}')
         with patch.object(briefing.config, "briefing_enable_portrait", True), patch.object(briefing, "generate_image", AsyncMock(return_value=result)) as generate:
             portrait = await briefing.generate_briefing_portrait(card, 123)
-        self.assertEqual(portrait.size, (30, 20))
+        self.assertEqual(portrait.size, (1600, 900))
+        portrait.close()
         self.assertEqual(generate.await_args.kwargs["orientation"], "landscape")
         self.assertIn(card["portrait_prompt"], generate.await_args.args[0])
         self.assertEqual(card["portrait_status"], "generated")
         self.assertFalse(any(isinstance(value, (bytes, Image.Image)) for value in card.values()))
+
+    async def test_member_portrait_uses_official_refs_and_rejects_vertical_output(self):
+        card = {"active_members": [{"name": "甲", "personality_tag": "手艺人", "comment": "拆掌机"}]}
+        raw = BytesIO()
+        with Image.new("RGB", (30, 60)) as source:
+            source.save(raw, format="PNG")
+        result = SimpleNamespace(image_bytes=raw.getvalue(), model_spec="openai:image")
+        with (
+            patch.object(briefing, "_briefing_references", return_value=["official-image"]),
+            patch.object(briefing, "generate_image", AsyncMock(return_value=result)) as generate,
+        ):
+            self.assertIsNone(await briefing.generate_member_portraits(card, 123))
+        self.assertEqual(card["member_portrait_status"], "failed")
+        self.assertEqual(generate.await_args.kwargs, {"orientation": "landscape", "reference_images": ["official-image"]})
 
     async def test_portrait_failure_timeout_and_disabled_do_not_block(self):
         async def stalled(*args, **kwargs):

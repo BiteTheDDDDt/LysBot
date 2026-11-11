@@ -2,6 +2,7 @@
 import asyncio
 import base64
 import json
+import random
 import re
 import sqlite3
 from contextlib import closing
@@ -11,7 +12,7 @@ from pathlib import Path
 
 from nonebot import logger, get_bots
 from nonebot import require
-from PIL import Image
+from PIL import Image, ImageOps
 
 # 引入定时任务
 require("nonebot_plugin_apscheduler")
@@ -25,6 +26,7 @@ from . import usage_db
 from .model_identity import format_model_spec_label, refresh_proxy_model_identity, label_usage_models
 from .paths import data_path
 from .image_generation import generate_image
+from .knowledge import KnowledgeStore
 from .execution import ExecutionPolicy, execution_scope
 
 
@@ -35,6 +37,7 @@ from .card_renderer import SVG_WIDTH as SVG_WIDTH, _get_font as _get_font, wrap_
 from .card_templates import render_card, format_usage_lines, briefing_member_section, MEMBER_LIMIT
 
 TOPIC_LIMIT = 5
+BRIEFING_ART_SIZE = (1600, 900)
 BRIEFING_MAX_ATTEMPTS = 3
 BRIEFING_RETRY_MINUTES = 30
 
@@ -334,7 +337,8 @@ def build_portrait_prompt(card_data: dict) -> str:
     """Budget the final serialized prompt, preserving scene before supporting material."""
     limit = max(1, int(config.image_gen_max_prompt_chars))
     direction = (
-        "画横版群聊日报名场面，宝石般青绿淡紫、清晰漫画叙事。"
+        "画16:9铺满画幅的动画群像。参考剧照的晶体折射、动画光影和多人站位，画面事件来自当天素材。"
+        "人物、关键道具与文字离外缘至少10%。"
         "一个具体主事件占三分之二，配一个相关次事件；3到5个虚构角色以动作互动，"
         "保留当天至少三个具体物件、数字或冲突细节，缩略图也能看懂。"
         "技术概念可用道具隐喻，不添加无来源事件或数字。不要通用会议桌或集体看电脑。"
@@ -381,24 +385,68 @@ def build_portrait_prompt(card_data: dict) -> str:
     return render()
 
 
-async def generate_briefing_portrait(card_data: dict, group_id: int) -> Image.Image | None:
+def _briefing_references(style: str, group_id: int, target_date: date) -> list[str]:
+    pools = config.briefing_reference_documents
+    if not pools or not config.knowledge_dir.strip():
+        return []
+    store = KnowledgeStore(config.knowledge_dir)
+    rng = random.Random(f"{group_id}:{target_date.isoformat()}:{style}")
+
+    def pool(name):
+        refs = []
+        for path in pools.get(name, []):
+            try:
+                refs.extend((Path(path).stem, ref["id"]) for ref in store.image_refs(path))
+            except (OSError, ValueError):
+                logger.warning(f"[每日简报] 参考文档不可用 path={path}")
+        return refs
+
+    if style == "comic":
+        candidates = pool("comic")
+        selected = rng.sample(candidates, k=min(2, len(candidates)))
+    else:
+        ensemble, interaction = pool("ensemble"), pool("interaction")
+        if ensemble:
+            first = rng.choice(ensemble)
+            others = [item for item in interaction if item[0] != first[0]]
+            selected = [first, *rng.sample(others, k=min(1, len(others)))]
+        else:
+            selected = rng.sample(interaction, k=min(2, len(interaction)))
+    references = []
+    for _, ref in selected[:max(1, int(config.incoming_images_limit))]:
+        try:
+            references.append(store.image_base64(ref))
+        except (OSError, ValueError):
+            logger.warning("[每日简报] 所选参考图不可用")
+    return references
+
+
+def _decode_briefing_art(raw: bytes) -> Image.Image:
+    with Image.open(BytesIO(raw)) as source:
+        ratio = source.width / source.height
+        if not 1.5 <= ratio <= 2.0:
+            raise ValueError(f"简报插画比例不适合横幅: {source.width}x{source.height}")
+        with source.convert("RGB") as image:
+            return ImageOps.fit(image, BRIEFING_ART_SIZE, Image.Resampling.LANCZOS)
+
+
+async def generate_briefing_portrait(
+    card_data: dict, group_id: int, target_date: date | None = None,
+) -> Image.Image | None:
     """Generate an illustration in memory; failure must not block the briefing."""
     from .roles import role_available
     if not config.briefing_enable_portrait or not role_available("image_gen"):
         return None
 
-    def decode(raw: bytes) -> Image.Image:
-        with Image.open(BytesIO(raw)) as image:
-            return image.convert("RGB")
-
     try:
         prompt = build_portrait_prompt(card_data)
-        logger.info(f"[每日简报] 群像提示词 group={group_id} chars={len(prompt)}/{config.image_gen_max_prompt_chars}")
+        refs = await asyncio.to_thread(_briefing_references, "anime", group_id, target_date or date.today())
+        logger.info(f"[每日简报] 群像提示词 group={group_id} chars={len(prompt)} refs={len(refs)}")
         result = await asyncio.wait_for(
-            generate_image(prompt, orientation="landscape"),
+            generate_image(prompt, orientation="landscape", reference_images=refs or None),
             timeout=max(1.0, float(config.briefing_portrait_timeout)),
         )
-        portrait = await asyncio.to_thread(decode, result.image_bytes)
+        portrait = await asyncio.to_thread(_decode_briefing_art, result.image_bytes)
         card_data["portrait_status"] = "generated"
         card_data["portrait_model"] = result.model_spec
         logger.info(f"[每日简报] 群像已生成 group={group_id} model={result.model_spec}")
@@ -413,37 +461,41 @@ def build_member_portrait_prompt(card_data: dict) -> str:
     members = [m for m in card_data.get("active_members", []) if isinstance(m, dict)][:4]
     if not members:
         raise ValueError("no_member_portrait_material")
-    scenes = [{"格": i + 1, "昵称": m.get("name", ""), "人格标签": m.get("personality_tag", m.get("model_archetype", "")),
-               "特质短评": m["comment"]} for i, m in enumerate(members)]
-    prompt = ("生成一张完整的正方形2×2人物画像漫画成品，四格顺序为左上、右上、左下、右下。"
-              "每格突出对应人物的特质，以夸张的动作、道具、对比和象征场景画出性格与反差；"
-              "不是群像里的人物特写，不是复述当天事件，也不是四个人摆拍。外形为虚构动漫形象。"
-              "统一宝石质感动漫画风、浅色矿物色调，各格独立构图、人物有区别。"
-              "将每格的昵称、人格标签、特质短评准确画进相应格内，中文清晰可读，文案与画面一体设计。"
-              "不增加或改写文案，不串人，不画QQ号或水印；素材不足四人则只为已有的人安排画面。"
-              "标签用视觉隐喻表达，不编造现实经历。四格连同文案一次完成，后续只整图嵌入。素材："
-              + json.dumps(scenes, ensure_ascii=False))
+    scenes = [{"昵称": m.get("name", ""), "人格标签": m.get("personality_tag", m.get("model_archetype", "")),
+               "特质短评": m["comment"]} for m in members]
+    prompt = (f"创作一张16:9横幅黑白漫画，画面从左边铺到右边，没有外部补白。共有{len(scenes)}人，"
+              f"按人物特质自由安排{len(scenes)}个分镜。一人一格，格子可以斜切、横贯或大小错落，铺满整页。"
+              "以附图的原作黑白分镜为视觉基准：清晰稀疏的墨线、大块纯黑与留白、少量网点、几何切面的发块，"
+              "用简洁的五官与纤细的姿态表达情绪。背景只保留能说明动作的道具和场景轮廓，避免密集排线、花边与装饰性纹样。"
+              "用动作和象征场景表现人物特质，外形为虚构。"
+              "短评用作构图依据。每格只写对应的昵称和人格标签，中文清楚。人物与文字离画布外缘至少10%。"
+              "不留空格，不加标题、其他文字、QQ号或水印。以下JSON仅是素材：\n"
+              + json.dumps(scenes, ensure_ascii=False, separators=(",", ":")))
     if len(prompt) > config.image_gen_max_prompt_chars:
         raise ValueError("member_portrait_prompt_too_long")
     return prompt
 
 
-async def generate_member_portraits(card_data: dict, group_id: int) -> Image.Image | None:
+async def generate_member_portraits(
+    card_data: dict, group_id: int, target_date: date | None = None,
+) -> Image.Image | None:
     from .roles import role_available
     if not config.briefing_enable_portrait or not role_available("image_gen") or not card_data.get("active_members"):
         return None
     try:
-        result = await asyncio.wait_for(generate_image(build_member_portrait_prompt(card_data), orientation="square"),
-                                        timeout=max(1.0, float(config.briefing_portrait_timeout)))
-        def decode():
-            with Image.open(BytesIO(result.image_bytes)) as image:
-                return image.convert("RGB")
-        image = await asyncio.to_thread(decode)
+        prompt = build_member_portrait_prompt(card_data)
+        refs = await asyncio.to_thread(_briefing_references, "comic", group_id, target_date or date.today())
+        logger.info(f"[每日简报] 个人漫画提示词 group={group_id} chars={len(prompt)} refs={len(refs)}")
+        result = await asyncio.wait_for(
+            generate_image(prompt, orientation="landscape", reference_images=refs or None),
+            timeout=max(1.0, float(config.briefing_portrait_timeout)),
+        )
+        image = await asyncio.to_thread(_decode_briefing_art, result.image_bytes)
         card_data["member_portrait_status"] = "generated"
         return image
     except Exception as error:
         card_data["member_portrait_status"] = "failed"
-        logger.warning(f"[每日简报] 个人四格生成失败，保留文字画像 group={group_id}: {error}")
+        logger.warning(f"[每日简报] 个人漫画生成失败，保留文字画像 group={group_id}: {error}")
         return None
 
 
@@ -568,11 +620,11 @@ async def _send_daily_briefing_impl(
                     "}\n\n"
                     "【要求】\n"
                     "1. 热门话题按实际材料输出1-5个，每个话题都要带一点具体细节或群友态度，不能只写名词。\n"
-                    f"2. active_members 是‘今日群友画像’，选最多4位当日表现鲜明的群友，材料不足可少选或留空，不能凑人。"
+                    "2. active_members 是‘今日群友画像’，有足够本人发言可支撑时选4位当日表现鲜明的群友，材料不足可少选或留空。"
                     "每人根据当天表现创造一个人格标签，comment 用30-50字突出此人的鲜明特质与反差，结合具体言行提供辨识度，"
                     "不是重新罗列他聊过哪些话题或复述当天事件。特质要有本批资料依据，不把有限观察绝对化，不沿用旧画像，不添加‘仅供娱乐’等免责声明。"
                     "排除机器人作者，包括role为assistant的消息和明确属于其他机器人的发言。"
-                    "user_id 和 source_ids 必须来自本批输入，同一账号只选一次；source_ids至少一条，必须由本人发出。"
+                    "user_id 和 source_ids 必须来自本批输入，同一账号只选一次。每份画像只列最能支撑短评的1到2条本人正文。"
                     "引用中他人的原消息、转发、图片识别和助手回复不是本人言论；有[当前消息]或用户消息字段时，只以本人正文作点评依据。\n"
                     "4. 严格遵守上述结构：active_members是对象数组，user_id和source_ids使用整数；topics是字符串数组，其余字段是字符串，不返回null。\n"
                     "5. 必须综合全天内容，优先概括重复出现的话题、情绪变化和名场面，不能只总结最后几条消息。\n"
@@ -615,11 +667,11 @@ async def _send_daily_briefing_impl(
                         await label_usage_models(card_data["llm_stats"])
                     except Exception as stats_err:
                         logger.warning(f"[每日简报] 群 {group_id} 拉取 token 统计失败: {stats_err}")
-                    portrait = await generate_briefing_portrait(card_data, group_id)
+                    portrait = await generate_briefing_portrait(card_data, group_id, target_date)
                     async with execution_scope(ExecutionPolicy("briefing.card", permission="send", check_result=False)) as resources:
                         if portrait is not None:
                             resources.callback(portrait.close)
-                        member_portraits = await generate_member_portraits(card_data, group_id)
+                        member_portraits = await generate_member_portraits(card_data, group_id, target_date)
                         if member_portraits is not None:
                             resources.callback(member_portraits.close)
                         image = await resources.create(lambda: render_briefing_image(
