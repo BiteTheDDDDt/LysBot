@@ -2,6 +2,7 @@ import asyncio
 import base64
 import json
 import tempfile
+from dataclasses import replace
 from pathlib import Path
 import unittest
 from types import SimpleNamespace
@@ -14,7 +15,7 @@ from nonebot.adapters.onebot.v11 import Message, MessageSegment
 nonebot.init()
 
 from src.plugins.llm_chat import chat, image_generation, tools
-from src.plugins.llm_chat.config import config
+from src.plugins.llm_chat.config import PERSONA, config
 from src.plugins.llm_chat.image_references import ImageReferenceStore, image_reference_store
 from src.plugins.llm_chat.planner import PlannerDecision, ReplyPart
 
@@ -138,6 +139,35 @@ class ImageReferenceTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(requests[0].url.path.endswith("/images/edits"))
         self.assertIn(PNG, requests[0].content)
         self.assertIn("磷叶石穿雨衣".encode(), requests[0].content)
+
+    async def test_persona_uses_configured_original_without_search(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "phos.md").write_text("# 磷叶石\n![角色原图](phos.png)\n", encoding="utf-8")
+            (root / "phos.png").write_bytes(PNG)
+            persona = replace(PERSONA, image_reference_document="phos.md")
+            generated = SimpleNamespace(image_bytes=PNG, model_spec="test", size="1024x1024",
+                                        mime_type="image/png", revised_prompt="")
+            with (
+                patch.object(config, "knowledge_dir", directory),
+                patch("src.plugins.llm_chat.config.PERSONA", persona),
+                patch.object(image_generation, "generate_image", AsyncMock(return_value=generated)) as generate,
+            ):
+                schema = tools._configured_media_tool("generate_image")["function"]["parameters"]
+                self.assertIn("image_subject", schema["required"])
+                tools.set_image_context(None, 42, self.bot)
+                missing = await tools.generate_image("拍个自拍")
+                self.assertIsInstance(missing, tools.MediaValidationFailure)
+                generate.assert_not_awaited()
+                result = await tools.generate_image("拍个自拍", image_subject="persona")
+                self.assertEqual(json.loads(result)["status"], "sent")
+                generate.assert_awaited_once_with("拍个自拍", orientation="auto", reference_images=[ENCODED])
+                tools.set_image_context(None, 42, self.bot)
+                await tools.generate_image("画一朵花", image_subject="other")
+                generate.assert_awaited_with("画一朵花", orientation="auto")
+                tools.set_image_context(None, 42, self.bot)
+                await tools.generate_image("不用参考图的自拍", image_subject="persona", reference_image_ids=[])
+                generate.assert_awaited_with("不用参考图的自拍", orientation="auto")
 
     async def test_tool_selects_history_original_and_retains_generated_image(self):
         historical = image_reference_store.remember("user_42", ENCODED, "上一轮原图")

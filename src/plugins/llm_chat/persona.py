@@ -12,6 +12,7 @@ class Persona:
     prompt: str
     appearance: str
     voice: str
+    image_reference_document: str = ""
 
 
 def load_persona(filename):
@@ -26,7 +27,9 @@ def load_persona(filename):
     aliases = data.get("aliases", [])
     if not isinstance(aliases, list) or any(not isinstance(value, str) for value in aliases):
         raise ValueError("Persona aliases must be a string list")
-    if any(not isinstance(data.get(key, ""), str) for key in ("appearance", "voice")):
-        raise ValueError("Persona appearance and voice must be strings")
+    for key in ("appearance", "voice", "image_reference_document"):
+        if not isinstance(data.get(key, ""), str):
+            raise ValueError(f"Invalid persona field: {key}")
     return Persona(data["name"], tuple(aliases), data["prompt"].strip() + "\n" + SYSTEM_RULES,
-                   data.get("appearance", ""), data.get("voice", ""))
+                   data.get("appearance", ""), data.get("voice", ""),
+                   data.get("image_reference_document", "").strip())

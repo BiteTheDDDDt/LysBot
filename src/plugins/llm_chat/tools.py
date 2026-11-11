@@ -89,7 +89,7 @@ def _configured_media_tool(required_tool: str):
     media_tool = MEDIA_CHAT_TOOLS.get(required_tool)
     if media_tool is None:
         raise ValueError(f"未知的 required_tool: {required_tool}")
-    from .config import config
+    from .config import PERSONA, config
 
     media_tool = deepcopy(media_tool)
     field, limit = (
@@ -101,6 +101,16 @@ def _configured_media_tool(required_tool: str):
     parameter.update(minLength=1, maxLength=max(1, int(limit)))
     parameter["description"] += f"最多 {parameter['maxLength']} 字，请在调用前精简至上限以内。"
     if required_tool == "generate_image":
+        schema = media_tool["function"]["parameters"]
+        if PERSONA.image_reference_document and config.knowledge_dir.strip():
+            schema["properties"]["image_subject"] = {
+                "type": "string",
+                "enum": ["persona", "other"],
+                "description": f"主体包含当前角色 {PERSONA.name} 时用 persona，包括对方要看你的自拍、"
+                "照片或装扮。其他主体用 other。省略 reference_image_ids 且本轮无原图时，"
+                "persona 会自动使用已配置的角色原图。",
+            }
+            schema["required"].append("image_subject")
         context = _image_context.get() or {}
         current_ids = context.get("current_reference_ids", [])
         references = context.get("references", {})
@@ -553,9 +563,11 @@ async def send_voice(text: str, emotion: str = "neutral") -> str:
 @_exclusive_media("image")
 async def generate_image(
     prompt: str, orientation: str = "auto", reference_image_ids: Optional[list[str]] = None,
+    image_subject: Optional[str] = None,
 ) -> str:
     """Generate an image through MODEL_IMAGE_GEN and immediately send it to QQ."""
-    from .config import config
+    from .config import PERSONA, config
+    from .knowledge import KnowledgeStore
     from .image_generation import (
         ImageGenerationError,
         generate_image as generate_image_bytes,
@@ -587,16 +599,31 @@ async def generate_image(
     if orientation not in ("auto", "square", "landscape", "portrait"):
         return MediaValidationFailure("generate_image 失败：orientation 必须是 auto、square、landscape 或 portrait")
 
+    persona_document = PERSONA.image_reference_document if config.knowledge_dir.strip() else ""
+    if image_subject not in (None, "persona", "other") or (
+        persona_document and image_subject is None and reference_image_ids is None
+    ):
+        return MediaValidationFailure("请填写 image_subject：画当前角色用 persona，其他主体用 other。")
+    max_refs = max(1, int(config.incoming_images_limit))
     if reference_image_ids is None:
         if ctx.get("missing_reference_images"):
             return MediaValidationFailure("参考图片下载不完整，请用户重新发送或明确选择可用原图；不能仅凭文字描述重画。")
         reference_image_ids = ctx.get("current_reference_ids", [])
         if reference_image_ids and not ctx.get("allow_auto_reference", True):
             return MediaValidationFailure("本轮有多位用户的图片，请明确填写 reference_image_ids，避免选错原图。")
+        if not reference_image_ids and image_subject == "persona" and persona_document:
+            store = KnowledgeStore(config.knowledge_dir)
+            try:
+                refs = await asyncio.to_thread(store.image_refs, persona_document)
+            except (OSError, ValueError):
+                refs = []
+            if not refs:
+                return MediaValidationFailure("已配置的角色参考图不可用，请重新选择可用的图片引用。")
+            reference_image_ids = [ref["id"] for ref in refs[:min(2, max_refs)]]
     if not isinstance(reference_image_ids, list) or any(not isinstance(item, str) for item in reference_image_ids):
         return MediaValidationFailure("reference_image_ids 必须是图片引用 ID 的数组")
     reference_image_ids = list(dict.fromkeys(reference_image_ids))
-    if len(reference_image_ids) > max(1, int(config.incoming_images_limit)):
+    if len(reference_image_ids) > max_refs:
         return MediaValidationFailure("参考图片过多，请明确选择需要的原图")
     references = ctx.get("references", {})
     originals = []
@@ -604,7 +631,6 @@ async def generate_image(
         if ref_id in references:
             originals.append(references[ref_id].base64)
         elif ref_id.startswith("ki:") and config.knowledge_dir.strip():
-            from .knowledge import KnowledgeStore
             try:
                 original = await asyncio.to_thread(KnowledgeStore(config.knowledge_dir).image_base64, ref_id)
             except (OSError, ValueError):

@@ -40,6 +40,8 @@ MODEL_FALLBACK="google:gemini-3.5-flash-lite | openrouter:nvidia/nemotron-3-ultr
 
 `PERSONA_FILE` 默认是 `personas/phosphophyllite.toml`，文件包含角色名称、性格与口吻、外貌和声音。通用执行规则由程序维护。更换人设后重启 bot。
 
+可选的 `image_reference_document` 指向知识库根目录下的相对 Markdown 路径。生成当前角色的自拍或装扮时，工具默认加载该文档前两张可用的原图，仍受参考图数量限制。用户附图和显式选择的图片引用优先；显式传空列表可以取消默认参考。
+
 主动接话、复读、表情、冷群梗图、jrrp 和戳一戳保留为内置互动行为。静音命令和掉线邮件已从新版移除。
 
 `ENABLE_DAILY_BRIEFING`、`ENABLE_DAILY_NEWS_BROADCAST`、`ENABLE_MODEL_CARD` 默认为 false。新闻要求前两项同时开启并配置搜索模型；群像仅在生图可用时生成。配置冲突会在启动时说明。

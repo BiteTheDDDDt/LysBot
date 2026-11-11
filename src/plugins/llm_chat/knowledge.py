@@ -127,6 +127,11 @@ class KnowledgeStore:
                 links.append(({"id": f"ki:{doc.id[2:]}:{index}", "alt": alt}, path))
         return links
 
+    def image_refs(self, relative):
+        """Read the image references in a deployment-configured document."""
+        doc, _ = self._document(relative)
+        return [reference for reference, _ in self._image_links(doc)]
+
     def image_base64(self, reference_id):
         """Resolve a document attachment by ID without accepting a file path."""
         if not reference_id.startswith("ki:") or len(reference_id) > 2053:

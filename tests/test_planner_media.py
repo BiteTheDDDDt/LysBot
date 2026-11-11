@@ -273,6 +273,8 @@ class PlannerMediaTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(planner._explicit_required_tool("你会生成图片吗"), "")
         self.assertEqual(planner._explicit_required_tool("不要生成图片"), "")
+        self.assertEqual(planner._explicit_required_tool("发个自拍"), "generate_image")
+        self.assertEqual(planner._explicit_required_tool("他发了个自拍"), "")
 
     async def test_planner_output_exposes_required_tool(self):
         with (
