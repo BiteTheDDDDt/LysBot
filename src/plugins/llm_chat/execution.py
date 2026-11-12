@@ -71,7 +71,7 @@ async def execution_scope(policy, *, session_id=None, run_id=None, timeout=None,
     sid = session_id or (state.session_id if state else None)
     if sid is None:
         # Model/command callers can carry scope without a serialized chat turn.
-        from .models import current_session_id
+        from .model_types import current_session_id
         sid = current_session_id.get()
     if sid == "_unknown_":
         sid = None

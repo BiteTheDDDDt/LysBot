@@ -649,7 +649,8 @@ class AgentRunner:
     async def _run(
         self, backend, messages, extra_body=None, tools_enabled=False, required_tool=None, media_followup=True
     ):
-        from .models import ChatResponse, _add_usage, _extract_openai_usage, _strip_fake_tool_calls
+        from .model_types import ChatResponse, _add_usage, _extract_openai_usage
+        from .model_adapters import _strip_fake_tool_calls
         from .tools import MediaValidationFailure, execute_tool, image_was_sent_this_round, voice_was_sent_this_round
 
         client, kwargs, formatted, supports_tools, selected_tools = backend.prepare_request(

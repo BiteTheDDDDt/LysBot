@@ -4,6 +4,10 @@ import time
 from .logging_setup import general_logger
 
 
+SQLITE_WRITE_RETRIES = 3
+SQLITE_WRITE_RETRY_BASE_DELAY = 0.5
+
+
 @asynccontextmanager
 async def measured_write_lock(lock, operation):
     queued = time.monotonic()

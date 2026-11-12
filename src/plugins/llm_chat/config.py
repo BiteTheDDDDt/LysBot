@@ -238,7 +238,7 @@ def agentic_enabled(session_id=None):
     if not config.agentic_search_sessions:
         return True
     if session_id is None:
-        from .models import current_session_id
+        from .model_types import current_session_id
         session_id=current_session_id.get()
     return session_id in config.agentic_search_sessions
 

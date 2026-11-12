@@ -9,7 +9,7 @@ import nonebot
 
 nonebot.init()
 
-from src.plugins.llm_chat import agent_runner, chat, context_builder, models, tools
+from src.plugins.llm_chat import incoming, model_adapters, agent_runner, chat, context_builder, models, tools
 from src.plugins.llm_chat.config import config
 from test_tool_rounds import FakeToolMessage, make_response, make_tool_call
 
@@ -43,7 +43,7 @@ class CaseRegressions(unittest.IsolatedAsyncioTestCase):
         with (
             patch.dict("os.environ", {"MODEL_IMAGE_GEN": "cliproxyapi:gpt-image-test"}),
             patch.object(agent_runner, "_runtime_path", None),
-            patch.object(models, "model_supports_tools", return_value=True),
+            patch.object(model_adapters, "model_supports_tools", return_value=True),
             patch.object(manager, "_resolve_candidates", return_value=(adapter.model_name, [adapter.model_name])),
             patch.object(manager, "get_or_build_adapter", return_value=adapter),
             patch.object(tools, "execute_tool", AsyncMock(side_effect=send)) as execute,
@@ -139,10 +139,10 @@ class CaseRegressions(unittest.IsolatedAsyncioTestCase):
 
     async def test_received_face_is_described_but_literal_format_examples_are_preserved(self):
         literal = '代码示例："[表情: 捂脸笑]"'
-        text, images = await chat._render_message_value(
+        text, images = await incoming._render_message_value(
             SimpleNamespace(),
             [{"type": "face", "data": {"id": "14"}}, {"type": "text", "data": {"text": literal}}],
-            chat._ExpansionBudget(), depth=0,
+            incoming._ExpansionBudget(), depth=0,
         )
         self.assertIn("[收到QQ表情：", text)
         self.assertIn(literal, text)

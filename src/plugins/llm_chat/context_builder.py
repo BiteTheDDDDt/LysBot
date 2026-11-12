@@ -6,7 +6,7 @@ from nonebot import logger
 
 from .config import PERSONA_PROMPT, config
 from .memory import memory_manager
-from .models import Message as LLMMessage
+from .model_types import Message as LLMMessage
 from .planner import PlannerDecision
 from .reply_policy import ReplyPolicy, SHORT_REPLY, constrain_plan
 from .sentiment import sentiment_analyzer

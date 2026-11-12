@@ -8,7 +8,7 @@ from nonebot.adapters.onebot.v11 import Message, MessageSegment
 
 nonebot.init()
 
-from src.plugins.llm_chat import chat
+from src.plugins.llm_chat import incoming, chat
 from src.plugins.llm_chat.chat import record_group_message, resolve_incoming_message
 from src.plugins.llm_chat.models import Message as LLMMessage
 
@@ -43,7 +43,7 @@ def make_event(
 
 class IncomingMessageExpansionTests(unittest.IsolatedAsyncioTestCase):
     def tearDown(self):
-        chat._mention_names.clear()
+        incoming._mention_names.clear()
         chat.image_reference_store.clear()
 
     async def test_direct_mentions_preserve_target_names_ids_and_spacing(self):

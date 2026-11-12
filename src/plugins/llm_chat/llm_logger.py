@@ -264,7 +264,7 @@ class NativeCall:
     """
     def __init__(self, *, role, model, caller, fallback_attempt=0):
         from .conversation import current_scope
-        from .models import current_session_id
+        from .model_types import current_session_id
         scope = current_scope()
         self.arguments = dict(role=role, model=model, caller=caller, messages=[],
                               session_id=scope.session_id if scope else current_session_id.get())

@@ -968,7 +968,7 @@ async def recall_history(
     keyword_mode: str = "",
 ) -> str:
     """让 Chat LLM 自主检索当前会话的多层 memory。"""
-    from .models import current_session_id
+    from .model_types import current_session_id
     from .memory import memory_manager
 
     sid = current_session_id.get() or "_unknown_"
@@ -1090,7 +1090,7 @@ async def recall_history(query="", mode="hybrid", sources=None, author_ids=None,
             sender_names=sender_names,since=since,until=until,roles=roles,match_mode=match_mode,
             sort=sort,limit=limit,**legacy)
     from .memory import memory_manager
-    from .models import current_session_id
+    from .model_types import current_session_id
     from .retrieval import HistorySearch,failure
     allowed={"keyword","sender_name","role","keyword_mode","context_before","context_after"}
     if set(legacy)-allowed:
@@ -1120,7 +1120,7 @@ async def recall_history(query="", mode="hybrid", sources=None, author_ids=None,
 
 async def read_history(ids=None,anchor_id=None,before=3,after=3,cursor=None,limit=20):
     from .memory import memory_manager
-    from .models import current_session_id
+    from .model_types import current_session_id
     from .retrieval import HistorySearch,failure
     if not current_session_id.get() or current_session_id.get()=="_unknown_":
         return json.dumps(failure("missing_session",invalid=True),ensure_ascii=False)
@@ -1157,7 +1157,7 @@ async def query_history(sql="", parameters=None, limit=30):
     from .config import agentic_enabled
     from .history_sql import query_history_sql
     from .memory import memory_manager
-    from .models import current_session_id
+    from .model_types import current_session_id
     from .retrieval import failure
 
     if not agentic_enabled():

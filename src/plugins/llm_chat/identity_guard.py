@@ -50,7 +50,7 @@ def _accounts(path, sid, items):
 
 
 async def verify_identity(run, draft, backend, client, kwargs):
-    from .models import _extract_openai_usage
+    from .model_types import _extract_openai_usage
 
     run.identity_verdict = {"status": "insufficient"}
     if not run.memory_path or run.remaining() < 4:

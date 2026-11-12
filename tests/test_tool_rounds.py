@@ -8,7 +8,7 @@ import nonebot
 
 nonebot.init()
 
-from src.plugins.llm_chat import models, tools
+from src.plugins.llm_chat import model_adapters, models, tools
 from src.plugins.llm_chat.config import config
 
 
@@ -117,7 +117,7 @@ class MultiRoundToolTests(unittest.IsolatedAsyncioTestCase):
 
         with (
             patch.object(config, "llm_max_tool_rounds", 3),
-            patch.object(models, "model_supports_tools", return_value=True),
+            patch.object(model_adapters, "model_supports_tools", return_value=True),
             patch.object(tools, "execute_tool", side_effect=fake_execute_tool),
         ):
             response = await adapter.chat(
@@ -190,7 +190,7 @@ class MultiRoundToolTests(unittest.IsolatedAsyncioTestCase):
 
         with (
             patch.object(config, "llm_max_tool_rounds", 3),
-            patch.object(models, "model_supports_tools", return_value=True),
+            patch.object(model_adapters, "model_supports_tools", return_value=True),
             patch.object(tools, "execute_tool", side_effect=fake_execute_tool),
         ):
             response = await adapter.chat(
@@ -253,7 +253,7 @@ class MultiRoundToolTests(unittest.IsolatedAsyncioTestCase):
             return '{"status":"sent","media_type":"image"}'
 
         with (
-            patch.object(models, "model_supports_tools", return_value=True),
+            patch.object(model_adapters, "model_supports_tools", return_value=True),
             patch.object(tools, "execute_tool", side_effect=fake_execute_tool),
         ):
             response = await adapter.chat(
@@ -306,7 +306,7 @@ class MultiRoundToolTests(unittest.IsolatedAsyncioTestCase):
             return '{"status":"sent","media_type":"image"}'
 
         with (
-            patch.object(models, "model_supports_tools", return_value=True),
+            patch.object(model_adapters, "model_supports_tools", return_value=True),
             patch.object(tools, "execute_tool", side_effect=fake_execute_tool),
         ):
             response = await adapter.chat(
@@ -350,7 +350,7 @@ class MultiRoundToolTests(unittest.IsolatedAsyncioTestCase):
         )
 
         with (
-            patch.object(models, "model_supports_tools", return_value=True),
+            patch.object(model_adapters, "model_supports_tools", return_value=True),
             patch.object(
                 tools,
                 "execute_tool",
@@ -395,7 +395,7 @@ class MultiRoundToolTests(unittest.IsolatedAsyncioTestCase):
 
         with (
             patch.object(config, "llm_max_tool_rounds", 1),
-            patch.object(models, "model_supports_tools", return_value=True),
+            patch.object(model_adapters, "model_supports_tools", return_value=True),
             patch.object(
                 tools,
                 "execute_tool",
@@ -445,7 +445,7 @@ class MediaAuthorizationTests(unittest.IsolatedAsyncioTestCase):
                     ])))
                     with (
                         patch.object(run, "remaining", return_value=40),
-                        patch.object(models, "model_supports_tools", return_value=True),
+                        patch.object(model_adapters, "model_supports_tools", return_value=True),
                         patch.object(adapter, "_create_completion", create),
                         patch.object(tools, "execute_tool", AsyncMock()) as execute,
                         self.assertRaisesRegex(RuntimeError, "未授权的工具"),
@@ -502,7 +502,7 @@ class MediaAuthorizationTests(unittest.IsolatedAsyncioTestCase):
                 try:
                     with (
                         patch.object(run, "remaining", side_effect=lambda: 40 if closing else 170),
-                        patch.object(models, "model_supports_tools", return_value=True),
+                        patch.object(model_adapters, "model_supports_tools", return_value=True),
                         patch.object(adapter, "_create_completion", side_effect=create),
                         patch.object(tools, "execute_tool", AsyncMock(side_effect=execute)) as executed,
                     ):
@@ -537,7 +537,7 @@ class MediaAuthorizationTests(unittest.IsolatedAsyncioTestCase):
         with (
             patch.object(manager, "_resolve_candidates", return_value=("openai:one", ["openai:one", "openai:two"])),
             patch.object(manager, "get_or_build_adapter", side_effect=[first, second]),
-            patch.object(models, "model_supports_tools", return_value=True),
+            patch.object(model_adapters, "model_supports_tools", return_value=True),
             patch.object(first, "_create_completion", AsyncMock(side_effect=[
                 make_response(FakeToolMessage([make_tool_call("search", "search_web", {"query": "鸽子"})])),
                 RuntimeError("provider unavailable"),
@@ -583,7 +583,7 @@ class MediaValidationRetryTests(unittest.IsolatedAsyncioTestCase):
         adapter.client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
         with (
             patch.object(config, "llm_max_tool_rounds", rounds),
-            patch.object(models, "model_supports_tools", return_value=True),
+            patch.object(model_adapters, "model_supports_tools", return_value=True),
             patch.object(tools, "execute_tool", execute),
         ):
             result = await adapter.chat(
@@ -672,7 +672,7 @@ class MediaValidationRetryTests(unittest.IsolatedAsyncioTestCase):
         )
         self.addAsyncCleanup(adapter.client.close)
         create = AsyncMock(side_effect=[self.image_response(), RuntimeError("timeout")])
-        with patch.object(adapter, "_create_completion", create), patch.object(tools, "execute_tool", execute), patch.object(models, "model_supports_tools", return_value=True):
+        with patch.object(adapter, "_create_completion", create), patch.object(tools, "execute_tool", execute), patch.object(model_adapters, "model_supports_tools", return_value=True):
             result = await adapter.chat([models.Message(role="user", content="画图")], tools_enabled=True, required_tool="generate_image")
         self.assertIn("失败", str(result))
         execute.assert_awaited_once()

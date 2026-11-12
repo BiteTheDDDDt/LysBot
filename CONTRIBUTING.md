@@ -41,6 +41,25 @@ python scripts/smoke_test.py
 
 发行版交付所选 tag 的源码，继续使用仓库 Dockerfile 和 Compose 构建部署，不要求上传运行数据、私人配置或额外制作二进制包。
 
+## 核心模块边界
+
+核心仍是单进程 NoneBot 应用。按职责定位修改，不在辅助模块创建第二套 manager、数据库连接或后台任务。
+
+| 模块 | 职责与边界 |
+| --- | --- |
+| `chat.py` | 事件处理、群聊聚合、参与规划与回复投递的衔接 |
+| `incoming.py` | OneBot 消息规范化、提及、引用和转发展开；拥有有界昵称缓存，不调用模型或写记忆 |
+| `models.py` | 模型路由、adapter 缓存、备用链与视觉请求；保留 `model_manager` 和已有调用入口 |
+| `model_types.py` | 共享消息／响应类型、用量及会话 ContextVar；其他模块需要数据类型时直接依赖这里 |
+| `model_adapters.py` | Provider 请求格式和协议；不决定业务模型路由 |
+| `model_turn.py` | 回合期限、Agent 生命周期及 planner 到 chat 的交接；通过传入的 manager 请求模型 |
+| `memory.py` | 会话缓存、数据库连接生命周期、共享写锁、摘要和信息抽取任务；保留原有记忆 API |
+| `memory_schema.py` | 在传入的连接上建表、升级旧列及安装检索 schema；不创建连接 |
+| `memory_queries.py` | 按会话隔离的 SQL 历史查询；通过回调取得当前连接 |
+| `digest_repository.py` | 简报、新闻及其来源查询和持久化；复用记忆连接、写锁和回滚逻辑 |
+
+`models.py` 保留共享类型与 adapter 的兼容导出，不能另建同名数据类型或 ContextVar。记忆仓储不保存某次打开的连接，确保关闭后重新连接仍然有效；写入继续遵守会话失效检查、取消回滚和同一连接的事务互斥。
+
 ## 开发与评估脚本
 
 | 脚本 | 使用场景 |

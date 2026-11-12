@@ -11,7 +11,7 @@ from nonebot.adapters.onebot.v11 import Message, MessageSegment
 
 nonebot.init()
 
-from src.plugins.llm_chat import chat, conversation, followups
+from src.plugins.llm_chat import incoming, chat, conversation, followups
 from src.plugins.llm_chat.memory import MemoryManager
 
 
@@ -61,7 +61,7 @@ class IncomingPipelineTests(unittest.IsolatedAsyncioTestCase):
         self.patches.close()
         MemoryManager._instance = self.previous_instance
         chat.image_reference_store.clear()
-        chat._mention_names.clear()
+        incoming._mention_names.clear()
         chat.group_message_orders.pop(self.group_id, None)
         chat.aggregation_buffers.pop(self.group_id, None)
         followups.windows.pop(self.group_id, None)
