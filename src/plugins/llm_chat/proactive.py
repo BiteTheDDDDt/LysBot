@@ -13,7 +13,7 @@ from .config import config
 from .utils import clean_response
 from .repeat import repeat_manager
 from .context_builder import build_context_messages
-from .reply_policy import PROACTIVE_REPLY, constrain_plan, enforce_reply_budget
+from .reply_policy import PROACTIVE_REPLY, constrain_plan, enforce_reply_budget, select_reply_policy
 from .planner import PlannerDecision, execute_planned_side_effect, plan_chat_action
 from .turns import is_meme_only, prepare_planned_meme, send_response_turn
 from .conversation import ensure_send_allowed, invalidate, serialized_turn
@@ -264,7 +264,7 @@ class ProactiveManager:
             user_content=trigger_message.strip() or recent_context.strip(),
             recent_context=recent_context,
             extra_system=extra_system,
-            reply_policy=PROACTIVE_REPLY,
+            reply_policy=select_reply_policy([], scene="proactive", decision=planner_decision),
             planner_decision=planner_decision,
             planned_meme=planned_meme,
         )
@@ -275,7 +275,7 @@ class ProactiveManager:
                 model=memory_manager.get_session_model(0, group_id) or None,
                 role="chat",
                 caller="proactive:speak",
-                reply_policy=PROACTIVE_REPLY,
+                reply_policy=select_reply_policy([], scene="proactive", decision=planner_decision),
                 session_id=f"group_{group_id}",
                 required_tool=(planner_decision.required_tool if planner_decision else None),
                 media_followup=(planner_decision.media_followup if planner_decision else True),
@@ -559,7 +559,7 @@ class ProactiveManager:
                         # 标记刚发言并设置 30 分钟冷却
                         from . import followups
                         if user_id:
-                            followups.answered(group_id, [user_id], sent_turn.text_for_memory, direct=True,
+                            followups.answered(group_id, [user_id, *addressing.audience, *addressing.mentions], sent_turn.text_for_memory, direct=True,
                                                closed=planner_decision.action == "close")
                         self.mark_just_spoke(group_id)
                         self.set_cooldown(group_id)

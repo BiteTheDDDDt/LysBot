@@ -1,6 +1,7 @@
 """Reply style guidance and non-destructive delivery cleanup."""
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, replace, field
 from typing import Iterable, Optional, TYPE_CHECKING
+from .qq_addressing import QQAddressing
 
 from nonebot import logger
 
@@ -21,6 +22,7 @@ class ReplyPolicy:
     detailed: bool = False
     tiny: bool = False
     text_parts: int | None = None
+    addressing: QQAddressing | None = field(default=None, compare=False)
 
     @property
     def max_chars(self) -> int:
@@ -73,7 +75,7 @@ def current_request_text(event, fallback: str = "") -> str:
     return getter() if callable(getter) else fallback
 
 
-def select_reply_policy(
+def _select_reply_policy(
     current_messages: Iterable[str],
     *,
     scene: str = "chat",
@@ -88,6 +90,11 @@ def select_reply_policy(
     if decision and decision.action == "poke":
         return replace(POKE_REPLY, tiny=decision.reply_mode == "tiny")
     return ReplyPolicy(scene=scene, detailed=bool(decision and decision.reply_mode == "detailed"), tiny=bool(decision and decision.reply_mode == "tiny"))
+
+
+def select_reply_policy(current_messages, *, scene="chat", decision=None):
+    policy = _select_reply_policy(current_messages, scene=scene, decision=decision)
+    return replace(policy, addressing=decision.addressing) if decision else policy
 
 
 def constrain_plan(

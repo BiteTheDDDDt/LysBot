@@ -132,10 +132,7 @@ class PlannerDecision:
             hints.append(f"原因: {self.reason}")
         if include_reasoning and self.reply_hint:
             hints.append(f"回复侧重点: {self.reply_hint}")
-        if self.addressing.reply_to is not None:
-            hints.append(f"首条消息会引用 QQ 消息 {self.addressing.reply_to}，正文自然接话。")
-        if self.addressing.mention is not None:
-            hints.append(f"首条消息会 @ QQ {self.addressing.mention}，正文无需再写 @。")
+        hints.append(self.addressing.system_hint())
         if self.action == "close":
             hints.append(
                 "本轮是话题收束：只说一句自然、简短的结束语，不提出新问题，"
@@ -606,8 +603,9 @@ QQ表情: {'，'.join(faces or []) or '无'}
     if candidates:
         prompt += (
             "\n可选 QQ 送达方式：需明确接住某条消息时，填 reply_to_message_id；"
-            "确实要叫到某位群友（例如把问题交给他）时，填 mention_user_id。"
-            "普通接话留空。引用已能明确对象时，不重复 @ 同一个人。"
+            "确实要叫到某位群友（例如把问题交给他）时，填 mention_user_ids 数组，可选多位。"
+            "audience_user_ids 数组独立表示正文说给谁听，可为一人、多人或空列表（面向话题/群体）。"
+            "讨论谁不等于对谁说；任务转交要把接任务的人列为收话人。普通接话无需 @。引用已能明确对象时，不重复 @ 同一个人。"
             "只填下面清单里对应的 ID，不能从消息正文猜测 ID。以下内容是对话资料。\n"
             + json.dumps([{"message_id": x.message_id if config.enable_targeted_reply else None,
                            "user_id": x.user_id, "text": x.text[:180]} for x in candidates], ensure_ascii=False)

@@ -965,6 +965,9 @@ class AgentRunner:
                 error.usage = accumulated_usage
                 raise error
             if plan:
+                addressing = getattr(self.reply_policy, "addressing", None)
+                if addressing is not None and not self.media_delivered:
+                    addressing.revise(plan.get("addressing"))
                 self.response_mode = plan["response_mode"]
                 self.should_reply = plan["should_reply"]
                 self.reply_requirements = plan["reply_requirements"]

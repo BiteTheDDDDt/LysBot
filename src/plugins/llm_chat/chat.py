@@ -224,6 +224,12 @@ def _get_event_message_id(event: MessageEvent) -> Optional[int]:
 def _event_message_targets(event: MessageEvent, message: str, *, user_id: int | None = None) -> tuple[MessageTarget, ...]:
     current = MessageTarget(_get_event_message_id(event), user_id if user_id is not None else event.user_id,
                             current_request_text(event, message))
+    targets = [current]
+    for segment in getattr(event, "original_message", None) or getattr(event, "message", ()):
+        if segment.type == "at":
+            raw_id = str(segment.data.get("qq", ""))
+            if raw_id.isdecimal() and int(raw_id) > 0:
+                targets.append(MessageTarget(None, int(raw_id), "本轮消息原生 @ 的对象"))
     reply = getattr(event, "reply", None)
     if reply is not None:
         message_id = _get_event_message_id(reply)
@@ -231,8 +237,8 @@ def _event_message_targets(event: MessageEvent, message: str, *, user_id: int | 
         if message_id is not None and isinstance(sender_id, int):
             quoted = getattr(reply, "message", None)
             excerpt = quoted.extract_plain_text() if isinstance(quoted, Message) else ""
-            return current, MessageTarget(message_id, sender_id, excerpt or "本轮所引用的消息")
-    return (current,)
+            targets.append(MessageTarget(message_id, sender_id, excerpt or "本轮所引用的消息"))
+    return tuple(targets)
 
 
 def _mark_group_message_seen(event: GroupMessageEvent) -> int:
@@ -1252,6 +1258,7 @@ async def _do_handle_single_chat(bot: Bot, event: MessageEvent, message: str,
     )
 
     # 调用模型
+    addressing = reply_policy.addressing or QQAddressing()
     sent_turn = None
     try:
         if planned_meme and is_meme_only(planner_decision):
@@ -1306,7 +1313,7 @@ async def _do_handle_single_chat(bot: Bot, event: MessageEvent, message: str,
         if group_id:
             proactive_manager.mark_just_spoke(group_id)
             from . import followups
-            followups.answered(group_id, [user_id], sent_turn.text_for_memory,
+            followups.answered(group_id, [user_id, *addressing.audience, *addressing.mentions], sent_turn.text_for_memory,
                                direct=_group_message_direction(event, event.get_plaintext())[0],
                                closed=bool(planner_decision and planner_decision.action == "close"))
 
@@ -1531,6 +1538,7 @@ async def _do_handle_merged_chat(
     )
 
     # 调用模型
+    addressing = reply_policy.addressing or QQAddressing()
     sent_turn = None
     try:
         # 注：群聊图片描述已由 record_group_message 在每条消息保存时调用 describe_image
@@ -1592,7 +1600,7 @@ async def _do_handle_merged_chat(
 
         # 保存助手回复
         from . import followups
-        followups.answered(group_id, [pm.user_id for pm in pending_messages], sent_turn.text_for_memory,
+        followups.answered(group_id, [*[pm.user_id for pm in pending_messages], *addressing.audience, *addressing.mentions], sent_turn.text_for_memory,
                            direct=any(_group_message_direction(pm.event, getattr(pm.event, "get_plaintext", lambda: pm.message)())[0]
                                       for pm in pending_messages),
                            closed=bool(planner_decision and planner_decision.action == "close"))

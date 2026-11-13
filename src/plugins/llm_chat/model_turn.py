@@ -112,9 +112,23 @@ async def run_stages(manager, messages, *, model, role, caller, session_id,
 
     runner = current_run.get()
     runner.revise_output = True
+    addressing = getattr(runner.reply_policy, "addressing", None)
+    initial_address_hint = addressing.system_hint() if addressing is not None else ""
+    if addressing is not None and addressing.candidates:
+        import json
+        planning_address_message = Message(role="system", content=(
+            "最终 JSON 可用 addressing 调整说话对象与送达，字段为 audience_user_ids、mention_user_ids 数组和 reply_to_message_id。"
+            "省略字段继承参与规划，空数组或 null 清除对应选择。收话人、引用来源、@分别决定。"
+            "媒体工具沿用参与规划的送达，媒体已经发送后本轮送达保持不变。只使用以下真实事件候选ID。\n"
+            + json.dumps([{"message_id": row.message_id if addressing.allow_reply else None,
+                           "user_id": row.user_id, "text": row.text[:180]}
+                          for row in addressing.candidates], ensure_ascii=False)
+        ))
     planning_messages = [*messages, Message(role="system", content=(
         PLANNING_STYLE + "\n较长任务可用 report_progress 告知已有发现或实际阻碍，不为进展拖延任务。"
     ))]
+    if addressing is not None and addressing.candidates:
+        planning_messages.append(planning_address_message)
     plan = await manager._chat_impl(
         planning_messages, model=None, role="planner", caller=caller + ":plan",
         session_id=session_id, allow_fallback=allow_fallback,
@@ -153,6 +167,10 @@ async def run_stages(manager, messages, *, model, role, caller, session_id,
             role="chat", caller=caller + ":render_fallback", session_id=session_id,
         )
     rendering_messages = [m for m in messages if m.role == "system"]
+    if addressing is not None:
+        rendering_messages = [replace(m, content=m.content.replace(initial_address_hint, addressing.system_hint()))
+                              for m in rendering_messages]
+        rendering_messages.append(Message(role="system", content=addressing.system_hint()))
     if runner.reply_policy:
         old_hint, final_hint = policy.system_hint(), runner.reply_policy.system_hint()
         if any(old_hint in m.content for m in rendering_messages):

@@ -111,7 +111,7 @@ async def handle_poke(bot: Bot, event: PokeNotifyEvent):
 async def _handle_poke_chat(bot: Bot, user_id: int, group_id: int = None):
     """处理戳一戳触发的聊天"""
     from .context_builder import build_context_messages
-    from .reply_policy import POKE_REPLY, enforce_reply_budget
+    from .reply_policy import POKE_REPLY, enforce_reply_budget, select_reply_policy
     from .models import model_manager
     from .memory import memory_manager
     from .utils import clean_response
@@ -175,7 +175,7 @@ async def _handle_poke_chat(bot: Bot, user_id: int, group_id: int = None):
         group_id=group_id,
         user_content=poke_message,
         user_name=sender_name,
-        reply_policy=POKE_REPLY,
+        reply_policy=select_reply_policy([], scene="poke", decision=decision),
         planner_decision=decision,
         planned_meme=planned_meme,
     )
@@ -185,7 +185,7 @@ async def _handle_poke_chat(bot: Bot, user_id: int, group_id: int = None):
         response_text = "" if is_meme_only(decision) else await model_manager.run_turn(
             messages, model=memory_manager.get_session_model(user_id, group_id) or None,
             role="chat", caller="events:trigger", session_id=session_id,
-            reply_policy=POKE_REPLY, required_tool=decision.required_tool,
+            reply_policy=select_reply_policy([], scene="poke", decision=decision), required_tool=decision.required_tool,
             media_followup=decision.media_followup,
         )
         reply_policy = getattr(response_text, "reply_policy", None) or POKE_REPLY
