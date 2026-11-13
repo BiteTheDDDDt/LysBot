@@ -39,7 +39,7 @@ class RoleSeparationTests(unittest.IsolatedAsyncioTestCase):
                         ], role="chat")
                     handoff = chat.chat.await_args.args[0][-1].content
                     self.assertIn(note, handoff)
-                    self.assertIn("核验备注和内部顾虑不作为答复要点", handoff)
+                    self.assertIn("提取直接回应用户的内容", handoff)
                     self.assertIn("普通玩笑直接接话", handoff)
                     self.assertNotIn("本轮必须保留的要求", handoff)
                     self.assertEqual(result.agent_run.planning_result, note)
@@ -59,7 +59,7 @@ class RoleSeparationTests(unittest.IsolatedAsyncioTestCase):
                 return models.ChatResponse("认真追问实际算法，需要澄清前述算式并非程序计算。")
             handoff = messages[-1].content
             self.assertIn("不能把玩笑算式说成真实算法", handoff)
-            self.assertIn("事实回答仍保留必要来源", handoff)
+            self.assertIn("认真问答保留必要来源", handoff)
             return models.ChatResponse(answer)
         with patch.object(manager, "_chat_impl", side_effect=call):
             result = await manager.run_turn([models.Message("user", "认真问，程序真的按这个算的吗？")])

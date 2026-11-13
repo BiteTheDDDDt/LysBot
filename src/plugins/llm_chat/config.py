@@ -265,7 +265,7 @@ def get_tool_usage_prompt(
     base += "概览只说明存储范围，不表示具体资料一定存在；内容、时间覆盖和最新状态通过实际检索确认。\n"
     if not role_available("search"):
         base = "\n".join(line for line in base.splitlines() if "search_web" not in line)
-        base += "\n未配置联网搜索；可读取用户给出的链接，不声称查过实时资料。\n"
+        base += "\n可用资料为当前上下文、会话历史和用户提供的链接。\n"
     media_role = {"send_voice": "tts", "generate_image": "image_gen"}.get(required_tool)
     if media_role and not role_available(media_role):
         return base + "\n本轮媒体能力未配置，以文字说明，不承诺发送。"
@@ -298,7 +298,5 @@ TOOL_USAGE_PROMPT = (
 # 无工具能力时的兜底提示词 - 模型不支持 tools 时附加，明确告知不要硬装调用工具
 NO_TOOL_PROMPT = """
 
-# 工具使用:
-- 本阶段不直接调用外部工具；已有 planner 结论和执行回执时，依据其中已核实的信息回答。不因本阶段没有工具而声称整个 bot 没有查询、图库或生图能力。仍缺事实时自然说明具体缺口，不能编造数字、来源或执行结果。
-- 严禁在回复里输出形如 `<tool_call>`、`<function=…>`、`<parameter=…>`、`search_web(...)`、`send_meme(...)`、`send_voice(...)`、`generate_image(...)` 之类的伪工具调用文本——正文中的调用不会被执行。
+根据已有结论和实际回执回答。若还缺影响答案的事实，只说明具体缺口。交付用户可读的正文；正文里的工具调用标记不会执行。
 """

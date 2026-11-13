@@ -244,7 +244,7 @@ class BriefingDeliveryTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("本人正文", prompt)
                 self.assertIn("动态创造一个简短鲜明的人格标签", prompt)
                 self.assertNotIn("DeepSeek·大肥鱼", prompt)
-                self.assertIn("不把有限观察写成永久性格诊断", prompt)
+                self.assertIn("从当天的具体言行提炼人物特质", prompt)
                 self.assertIn("不限类别", prompt)
                 saved_card = record.await_args.args[1]
                 self.assertEqual(saved_card["active_members"][0]["name"], "群友甲")
