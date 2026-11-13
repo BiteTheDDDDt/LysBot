@@ -138,7 +138,7 @@ class PlannerMediaTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("我想要安静一点的语气", prompt)
         self.assertIn("好，我记下了", prompt)
         self.assertIn("当前消息:\n那就念给我听", prompt)
-        self.assertIn("action=silent", prompt)
+        self.assertIn("可选 action：reply | close | silent | wait", prompt)
         self.assertIn("不按三轮机械收尾", prompt)
         self.assertIn('"parts"', prompt)
         self.assertIn("表情包是 reply 的一种可见输出", prompt)
@@ -239,7 +239,7 @@ class PlannerMediaTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(decision.required_tool, "generate_image")
         self.assertEqual([part.type for part in decision.parts], ["image"])
         self.assertFalse(decision.media_followup)
-        self.assertNotIn("recall", planner.PLANNER_ACTIONS)
+        self.assertNotIn("recall", planner.CHAT_ACTIONS)
 
     def test_media_can_be_followed_by_an_explicit_text_part(self):
         decision = planner._normalize_decision(
@@ -272,7 +272,7 @@ class PlannerMediaTests(unittest.IsolatedAsyncioTestCase):
             [("text", ""), ("meme", "funny")],
         )
         self.assertEqual(decision.meme_topic, "funny")
-        self.assertNotIn("meme", planner.PLANNER_ACTIONS)
+        self.assertNotIn("meme", planner.CHAT_ACTIONS)
 
     def test_legacy_meme_action_is_converted_to_reply_parts(self):
         decision = planner._normalize_decision(

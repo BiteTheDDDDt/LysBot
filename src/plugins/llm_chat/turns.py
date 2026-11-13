@@ -2,12 +2,12 @@
 import asyncio
 import random
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Awaitable, Callable, Optional
 
 from nonebot import logger
 
-from .planner import PlannerDecision
+from .planner import PlannerDecision, ReplyPart
 from .reply_policy import ReplyPolicy, SHORT_REPLY, constrain_plan, enforce_reply_budget
 
 
@@ -79,6 +79,10 @@ def split_two_texts(text: str, *, preserve_paragraphs: bool = False) -> list[str
     if "```" in raw or "$$" in raw:
         return [raw]  # Never break a fenced code/math block across messages.
 
+    paragraphs = re.split(r"\n\s*\n", raw, maxsplit=1)
+    if len(paragraphs) == 2 and all(part.strip() for part in paragraphs):
+        return [part.strip() for part in paragraphs]
+
     def cap_two(parts: list[str]) -> list[str]:
         cleaned = [_first_nonempty_text(p) for p in parts if _first_nonempty_text(p)]
         if len(cleaned) <= 2:
@@ -123,7 +127,7 @@ def build_turn_items(
     clean_text = text.strip()
     # The content planner can expand a one-text participation plan. Natural
     # paragraph breaks then suffice; no additional output schema is needed.
-    if (reply_policy.detailed and clean_text and not planned_meme
+    if (reply_policy.text_parts is None and reply_policy.detailed and clean_text and not planned_meme
             and (not decision or all(p.type == "text" for p in decision.parts))
             and "```" not in clean_text and "$$" not in clean_text):
         paragraphs = re.split(r'\n\s*\n', clean_text, maxsplit=1)
@@ -132,6 +136,8 @@ def build_turn_items(
     if not decision:
         return [("text", clean_text)] if clean_text else []
 
+    if reply_policy.text_parts and decision.action in {"reply", "close", "poke"} and not decision.meme_part and not decision.required_tool:
+        decision = replace(decision, parts=[ReplyPart("text")] * reply_policy.text_parts)
     text_slots = decision.text_part_count
     text_parts = (
         split_two_texts(text, preserve_paragraphs=reply_policy.detailed)[:text_slots]

@@ -1,4 +1,4 @@
-"""Share one standalone joke after a quiet group interval, without an LLM call."""
+"""Offer one participation opportunity after a quiet group interval."""
 import time
 from datetime import datetime
 
@@ -8,6 +8,7 @@ from .config import config
 from .conversation import serialized_turn, tracked_job
 from .memory import memory_manager
 from .memes import meme_manager
+from .planner import plan_chat_action
 from .proactive import proactive_manager
 
 require("nonebot_plugin_apscheduler")
@@ -50,7 +51,16 @@ async def share_idle_meme(bot, group_id):
     latest, human = await activity(group_id)
     if not quiet_enough(latest, human, previous[0] if previous else None, previous[1] if previous else 0, time.time()):
         return False
-    picked = await meme_manager.pick_random(None, meme_kind="joke")
+    # Claim the opportunity before planning, including when the planner stays quiet.
+    await db.execute("INSERT OR REPLACE INTO idle_meme_state VALUES(?,?,?)", (group_id, human, time.time()))
+    await db.commit()
+    decision = await plan_chat_action(
+        session_id=f"group_{group_id}", group_id=group_id, current_message="",
+        mode="proactive", is_direct=False, trigger_kind="idle", bot_self_id=str(bot.self_id),
+    )
+    if not decision.meme_part:
+        return False
+    picked = await meme_manager.pick_random(decision.meme_topic or None, meme_kind="joke")
     if not picked:
         return False
     meme_id, path, description = picked
@@ -61,14 +71,11 @@ async def share_idle_meme(bot, group_id):
         row = await cur.fetchone()
     if not row:
         return False
-    # Persist the attempt before sending: a restart must not replay an uncertain delivery.
-    await db.execute("INSERT OR REPLACE INTO idle_meme_state VALUES(?,?,?)", (group_id, human, time.time()))
-    await db.commit()
     token = _meme_context.set(None)
     try:
         set_meme_context(group_id, 0, bot)
         result = await send_picked_meme({"id": meme_id, "file_path": path, "topic": row[0],
-                                      "description": description, "reason": "群内连续两小时无消息，分享一张独立网络梗图"}, allow_reply=False)
+                                      "description": description, "reason": decision.reason}, allow_reply=False)
         sent = get_last_sent_meme()
         if not sent:
             logger.info(f"[idle_meme] group={group_id} send not confirmed: {result[:100]}")

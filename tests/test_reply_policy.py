@@ -195,8 +195,7 @@ class ReplyContextTests(unittest.IsolatedAsyncioTestCase):
         decision = PlannerDecision(reason="历史请求详细解释", reply_hint="建议详细写三百字",
                                    parts=[ReplyPart("text"), ReplyPart("text")])
         for policy in [SHORT_REPLY, DETAILED_REPLY, PROACTIVE_REPLY, POKE_REPLY]:
-            with patch.object(context_builder.memory_manager, "get_fixed_context_memory", AsyncMock(return_value={})), \
-                 patch.object(context_builder.config, "enable_sentiment_analysis", False):
+            with patch.object(context_builder.memory_manager, "get_fixed_context_memory", AsyncMock(return_value={})):
                 messages = await context_builder.build_context_messages(
                     history=[Message(role="system", content="旧系统要求写长文")], session_id="group_99",
                     query="详细解释这是检索文本", user_id=42, group_id=99, user_content="你怎么看",

@@ -1,18 +1,17 @@
 """主动发言模块 - 智能判断版"""
 import asyncio
-import random
 import time
 from typing import Dict, Set, List, Optional
 from dataclasses import dataclass
 
 from nonebot import logger
-from nonebot.adapters.onebot.v11 import Bot
+from nonebot.adapters.onebot.v11 import Bot, MessageSegment
 
 from .models import model_manager
 from .memory import memory_manager
 from .config import config
 from .utils import clean_response
-from .sentiment import sentiment_analyzer
+from .repeat import repeat_manager
 from .context_builder import build_context_messages
 from .reply_policy import PROACTIVE_REPLY, constrain_plan, enforce_reply_budget
 from .planner import PlannerDecision, execute_planned_side_effect, plan_chat_action
@@ -51,7 +50,6 @@ class ProactiveManager:
         # bot最后主动发言时间 {group_id: timestamp}
         self._last_spoke: Dict[int, float] = {}
         # 最近一次自我思考内容缓存 {group_id: content}
-        self._last_think: Dict[int, str] = {}
         # 判断不触发时，推迟相同群下次空闲判断的冷却 {group_id: timestamp}
         self._idle_retry_cooldowns: Dict[int, float] = {}
         # Planner 主动选择 wait 后的延迟重规划任务。
@@ -246,19 +244,9 @@ class ProactiveManager:
         history = await memory_manager.get_history(0, group_id, check_compress=True)
 
         # Previous participation decisions are not user requests or fresh evidence.
-        think_context = ""
         from .image_observations import UNSOLICITED_IMAGE_POLICY, unsolicited_view
         recent_context = unsolicited_view(recent_context)
         trigger_message = unsolicited_view(trigger_message)
-
-
-
-        # 使用最近窗口消息作为检索 query，并补充自我思考，空时回退到触发消息
-        query_text = recent_context.strip() if recent_context else ""
-        if think_context:
-            query_text = f"{query_text}\n{think_context}" if query_text else think_context
-        if not query_text and trigger_message:
-            query_text = trigger_message.strip()
 
         from .proactive_style import PROACTIVE_VALUE_POLICY
         extra_system = PROACTIVE_VALUE_POLICY + UNSOLICITED_IMAGE_POLICY + "\n本轮是主动参与；围绕触发消息自然接话，不必复述或总结。"
@@ -270,17 +258,15 @@ class ProactiveManager:
         messages = await build_context_messages(
             history=context_history,
             session_id=session_id,
-            query=query_text,
+            query=trigger_message or recent_context,
             user_id=0,
             group_id=group_id,
             user_content=trigger_message.strip() or recent_context.strip(),
             recent_context=recent_context,
-            think_context=think_context,
             extra_system=extra_system,
             reply_policy=PROACTIVE_REPLY,
             planner_decision=planner_decision,
             planned_meme=planned_meme,
-            related_user_id=0,
         )
 
         try:
@@ -301,12 +287,12 @@ class ProactiveManager:
 
     async def try_proactive(self, bot: Bot, group_id: int, message: str, user_id: int = 0, *,
                             _deferred: bool = False, _wait_started_at=None, _wait_replans=0,
-                            _recorded: bool = False) -> bool:
+                            _recorded: bool = False, repeat_candidate: str = "") -> bool:
         if not _deferred and not _recorded:
             self.add_recent_message(group_id, message, user_id)
             self.increment_counter(group_id)
         return await self._try_proactive(bot, group_id, message, user_id,
-            _deferred=_deferred, _wait_started_at=_wait_started_at, _wait_replans=_wait_replans)
+            _deferred=_deferred, _wait_started_at=_wait_started_at, _wait_replans=_wait_replans, repeat_candidate=repeat_candidate)
 
     @serialized_turn(lambda self, bot, group_id, *args, **kwargs: f"group_{group_id}", background=True)
     async def _try_proactive(
@@ -319,6 +305,7 @@ class ProactiveManager:
         _deferred: bool = False,
         _wait_started_at: Optional[float] = None,
         _wait_replans: int = 0,
+        repeat_candidate: str = "",
     ) -> bool:
         """尝试主动发言，返回是否触发了发言
 
@@ -340,15 +327,6 @@ class ProactiveManager:
         if self.is_on_cooldown(group_id):
             return False
 
-        # 情感分析：如果被讨厌，大幅降低主动发言概率
-        if config.enable_sentiment_analysis and not _deferred:
-            should_speak_less, probability_factor = sentiment_analyzer.should_speak_less(group_id)
-            if should_speak_less:
-                # 主动发言概率降低
-                if random.random() > probability_factor:
-                    logger.info(f"[主动发言] 群 {group_id} 情感状态不佳，跳过主动发言")
-                    return False
-
         count = self.msg_counters.get(group_id, 0)
 
         # 消息数量或空闲时间决定何时请 planner 评估。
@@ -358,6 +336,9 @@ class ProactiveManager:
         if _deferred:
             should_judge = True
             trigger_reason = "Planner wait 延迟重规划"
+        elif repeat_candidate:
+            should_judge = True
+            trigger_reason = "复读候选"
         elif count >= config.proactive_msg_threshold:
             should_judge = True
             trigger_reason = f"消息计数达到 {count} 条"
@@ -391,6 +372,7 @@ class ProactiveManager:
                 bot_self_id=str(bot.self_id),
                 is_direct=False,
                 default_action="silent",
+                repeat_candidate=repeat_candidate,
             )
             if planner_decision.action == "wait":
                 self.reset_counter(group_id)
@@ -408,20 +390,24 @@ class ProactiveManager:
 
             planner_decision = constrain_plan(planner_decision, PROACTIVE_REPLY)
             is_worth = planner_decision.should_continue
-            think_content = planner_decision.reason
 
             # 无论判断结果如何，都先重置计数器并设置判断冷却
             self.reset_counter(group_id)
             self.set_planner_cooldown(group_id)
 
+            if planner_decision.action == "repeat" and repeat_candidate:
+                ensure_send_allowed(group_id)
+                repeat_manager.mark_attempted(group_id)
+                await bot.send_group_msg(group_id=group_id, message=MessageSegment.text(repeat_candidate))
+                self.mark_just_spoke(group_id)
+                self.set_cooldown(group_id)
+                await memory_manager.add_message(0, "assistant", repeat_candidate, group_id)
+                return True
+
             if is_worth:
                 # 有意义，触发发言
                 logger.info(f"[主动发言] planner action={planner_decision.action}，准备生成回复")
 
-                if think_content:
-                    self._last_think[group_id] = think_content
-                    await memory_manager.add_message(0, "assistant", think_content, group_id, is_thinking=True)
-                    logger.info(f"[主动发言] 判定附带思考: {think_content}")
                 # 生成回复 (增加重试机制)
                 from .tools import (
                     clear_image_context,
@@ -548,6 +534,8 @@ class ProactiveManager:
                             raise cancelled
                         return True
 
+                    if not getattr(getattr(response, "agent_run", None), "should_reply", True):
+                        return poke_sent
                     if response or planned_meme:
                         # 清理回复内容
                         generated_response = response
@@ -563,7 +551,7 @@ class ProactiveManager:
                             decision=planner_decision,
                             planned_meme=planned_meme,
                             send_text=send_text_reply,
-                            reply_policy=PROACTIVE_REPLY,
+                            reply_policy=getattr(generated_response, "reply_policy", None) or PROACTIVE_REPLY,
                         )
                         if not sent_turn.sent_anything:
                             return poke_sent

@@ -28,7 +28,7 @@ MODEL_GROUPS = (
 )
 HIGH_VOLUME_ROLES = frozenset({"chat", "planner", "summary", "important_info"})
 SPECIAL_TOOL_ROLES = frozenset({"search", "vision", "tts", "image_gen"})
-GENERAL_ROLES = ("general", "briefing", "news_interest", "jrrp", "keyword_extract", "sentiment", "image_driver")
+GENERAL_ROLES = ("general", "briefing", "news_interest", "jrrp", "keyword_extract", "image_driver")
 ROLE_MODEL_KEYS = {
     "search": "MODEL_SEARCH",
     "vision": "MODEL_VISION",

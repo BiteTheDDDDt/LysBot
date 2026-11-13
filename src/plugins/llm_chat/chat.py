@@ -28,10 +28,9 @@ from .reply_policy import (
 from .planner import PlannerDecision, execute_planned_side_effect, plan_chat_action
 from .qq_addressing import MessageTarget, QQAddressing
 from .proactive import proactive_manager
-from .repeat import TEXT_ONLY as REPEAT_TEXT_ONLY, repeat_manager
+from .repeat import repeat_manager
 from .turns import is_meme_only, prepare_planned_meme, send_response_turn
 from .utils import clean_response
-from .sentiment import sentiment_analyzer
 from .conversation import (
     TurnSuperseded, current_generation, ensure_current_session, ensure_send_allowed,
     invalidate, serialized_turn, session_key, session_scope,
@@ -760,19 +759,6 @@ async def _enrich_group_record(bot, event, resolved, stored_message, sender_name
 
     faces = resolved.faces
 
-    repeated_text = ""
-    # 群复读检测（仅文字）
-    if config.enable_group_repeat and plain_message:
-        if not (REPEAT_TEXT_ONLY and (image_urls or faces)):
-
-            try:
-                if repeat_manager.try_repeat(group_id, user_id, str(event.self_id), plain_message):
-                    ensure_send_allowed(group_id)
-                    await bot.send(event, MessageSegment.text(plain_message))
-                    repeated_text = plain_message
-            except Exception as e:
-                logger.error(f"[群复读] 处理异常: {e}")
-
     # 忽略空消息（没有文字、没有图片、没有表情）
     if not message and not images_base64 and not faces:
         return
@@ -877,13 +863,6 @@ async def _enrich_group_record(bot, event, resolved, stored_message, sender_name
             return
     logger.info(f"[群聊记忆] 消息已保存")
     event._llm_memory_content = formatted_content
-    if repeated_text:
-        try:
-            await memory_manager.add_message(0, "assistant", repeated_text, group_id)
-            logger.info(f"[群复读] 已记录 bot 复读: group_id={group_id}, msg={repeated_text[:50]}...")
-        except Exception as e:
-            logger.warning(f"[群复读] 记录 bot 复读失败: group_id={group_id}, error={e}")
-
     ensure_current_session()
 
     from .image_observations import unsolicited_view
@@ -891,17 +870,6 @@ async def _enrich_group_record(bot, event, resolved, stored_message, sender_name
     proactive_manager.add_recent_message(group_id, proactive_content, user_id, _get_event_message_id(event))
     if not image_urls or plain_message.strip():
         proactive_manager.increment_counter(group_id)
-
-    # 情感分析：分析消息情感（异步）
-    if config.enable_sentiment_analysis and plain_message:
-        async def analyze_sentiment():
-            from .conversation import session_scope
-            with session_scope(f"group_{group_id}"):
-                await sentiment_analyzer.analyze(
-                    plain_message, user_id, group_id, is_to_bot=is_to_bot,
-                    directed_at_other=directed_at_other and not is_to_bot,
-                )
-        _start_incoming_task(analyze_sentiment())
 
     # 尝试主动发言（使用formatted_content，包含图片描述）
     if image_urls and not plain_message.strip():
@@ -916,7 +884,11 @@ async def _enrich_group_record(bot, event, resolved, stored_message, sender_name
         return
     if followups.eligible(group_id, user_id, directed_at_other):
         return  # The passive planner will decide whether this is actually a followup.
-    await proactive_manager.try_proactive(bot, group_id, proactive_content, user_id, _recorded=True)
+    repeat_candidate = ""
+    if not (directed_at_other or image_urls or faces) and repeat_manager.is_candidate(group_id, plain_message):
+        repeat_candidate = plain_message
+    kwargs = {"repeat_candidate": repeat_candidate} if repeat_candidate else {}
+    await proactive_manager.try_proactive(bot, group_id, proactive_content, user_id, _recorded=True, **kwargs)
 
 
 async def should_respond(event: MessageEvent) -> bool:
@@ -1556,11 +1528,6 @@ async def _do_handle_merged_chat(
         reply_policy=reply_policy,
         planner_decision=planner_decision,
         planned_meme=planned_meme,
-        related_user_id=0,
-        participant_profiles={
-            pm.user_id: format_sender_name(pm.sender_name)
-            for pm in pending_messages
-        },
     )
 
     # 调用模型

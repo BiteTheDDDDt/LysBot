@@ -20,7 +20,7 @@ class ModelRoutingTests(unittest.TestCase):
 
     def test_general_tasks_share_one_configuration(self):
         os.environ['MODEL_GENERAL'] = 'openai:general-first | openai:general-second'
-        for role in ('briefing', 'news_interest', 'jrrp', 'keyword_extract', 'sentiment'):
+        for role in ('briefing', 'news_interest', 'jrrp', 'keyword_extract'):
             with self.subTest(role=role):
                 self.assertEqual(roles.resolve_role(role), (
                     'openai:general-first', ['openai:general-second', 'openai:test-fallback'],

@@ -1,3 +1,4 @@
+from dataclasses import replace
 import unittest
 
 import nonebot
@@ -51,6 +52,17 @@ class ResponsePartsTests(unittest.TestCase):
         )
 
         self.assertEqual(items, [("text", "第一句"), ("text", "第二句")])
+
+    def test_execution_can_expand_or_collapse_preliminary_text_plan(self):
+        text = "第一段保留\n内部换行\n\n第二段保留"
+        one = PlannerDecision(parts=[ReplyPart("text")])
+        two = PlannerDecision(parts=[ReplyPart("text"), ReplyPart("text")])
+        self.assertEqual(build_turn_items(
+            text=text, decision=one, planned_meme=None, reply_policy=replace(DETAILED_REPLY, text_parts=2),
+        ), [("text", "第一段保留\n内部换行"), ("text", "第二段保留")])
+        self.assertEqual(build_turn_items(
+            text=text, decision=two, planned_meme=None, reply_policy=replace(DETAILED_REPLY, text_parts=1),
+        ), [("text", text)])
 
     def test_failed_media_explanation_is_not_discarded(self):
         decision = PlannerDecision(parts=[ReplyPart("image")])

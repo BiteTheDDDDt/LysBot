@@ -99,7 +99,7 @@ class PlannerWaitTests(unittest.IsolatedAsyncioTestCase):
         async def gated_sleep(_delay):
             await gate.wait()
         plan = AsyncMock(side_effect=[PlannerDecision(action='wait', wait_seconds=10), PlannerDecision(action='silent')])
-        with patch.object(proactive.config, 'enable_proactive', True), patch.object(proactive.config, 'enable_sentiment_analysis', False), patch.object(proactive.config, 'proactive_msg_threshold', 1), patch.object(proactive.config, 'planner_wait_max_seconds', 120), patch.object(proactive.config, 'planner_wait_max_replans', 3), patch.object(manager, 'is_on_cooldown', return_value=False), patch.object(manager, 'is_on_planner_cooldown', return_value=False), patch.object(proactive, 'plan_chat_action', plan), patch.object(proactive.asyncio, 'sleep', side_effect=gated_sleep):
+        with patch.object(proactive.config, 'enable_proactive', True), patch.object(proactive.config, 'proactive_msg_threshold', 1), patch.object(proactive.config, 'planner_wait_max_seconds', 120), patch.object(proactive.config, 'planner_wait_max_replans', 3), patch.object(manager, 'is_on_cooldown', return_value=False), patch.object(manager, 'is_on_planner_cooldown', return_value=False), patch.object(proactive, 'plan_chat_action', plan), patch.object(proactive.asyncio, 'sleep', side_effect=gated_sleep):
             result = await manager.try_proactive(SimpleNamespace(self_id='999'), group_id=79, message='群友还在分段输入', user_id=101)
             self.assertFalse(result)
             wait_task = manager._wait_tasks[79]

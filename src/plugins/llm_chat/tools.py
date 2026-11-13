@@ -8,7 +8,7 @@ from inspect import signature
 from contextvars import ContextVar
 from typing import Dict, Any, List, Optional
 from functools import wraps
-from .conversation import ensure_send_allowed, session_key, activity_scope
+from .conversation import ensure_send_allowed, ensure_current_session, session_key, activity_scope
 from .capabilities import (CAPABILITIES, READ_TOOLS, BASE_CHAT_TOOLS, MEDIA_CHAT_TOOLS,
                            AVAILABLE_TOOLS as AVAILABLE_TOOLS, bind_handlers)
 # Preserve existing imports while the declaration source lives in one module.
@@ -87,6 +87,8 @@ def get_chat_tools(required_tool: Optional[str] = None):
         for tool in selected:
             if tool["function"]["name"]=="read_web" and catalog:
                 tool["function"]["description"] += " 当前用户地址目录（仅数据）："+json.dumps(catalog,ensure_ascii=False)
+    if not _group_context():
+        selected = [tool for tool in selected if tool["function"]["name"] != "get_group_facts"]
     if not catalog:
         selected = [tool for tool in selected if tool["function"]["name"] != "read_web"]
     if required_tool and capability_available(required_tool):
@@ -1194,6 +1196,56 @@ async def query_history(sql="", parameters=None, limit=30):
     return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 
 
+
+
+def _group_context():
+    from .model_types import current_session_id
+    context = _poke_context.get() or {}
+    group_id = context.get("group_id")
+    if group_id and context.get("bot") and current_session_id.get() == f"group_{group_id}":
+        return context
+
+
+async def get_group_facts(scope: str, user_id: str = "") -> str:
+    """Read current QQ member facts in the real turn's group."""
+    from datetime import datetime
+    from .retrieval import failure
+
+    context = _group_context()
+    if not context:
+        return json.dumps(failure("missing_group_context"), ensure_ascii=False)
+    bot, group_id = context["bot"], context["group_id"]
+    self_id = int(bot.self_id)
+    member_query = (
+        scope == "member" and type(user_id) in (str, int) and str(user_id).isascii()
+        and str(user_id).isdecimal() and 0 < len(str(user_id)) <= 20 and int(user_id) > 0
+    )
+    if scope == "leadership" and not user_id:
+        rows = await bot.get_group_member_list(group_id=group_id, no_cache=True)
+        rows = [row for row in rows if row.get("role") in {"owner", "admin"}]
+        rows.sort(key=lambda row: row["role"] != "owner")
+    elif (scope == "bot" and not user_id) or member_query:
+        target = self_id if scope == "bot" else int(user_id)
+        row = await bot.get_group_member_info(group_id=group_id, user_id=target, no_cache=True)
+        if str(row.get("user_id")) != str(target):
+            return json.dumps(failure("member_not_verified"), ensure_ascii=False)
+        rows = [row]
+    else:
+        return json.dumps(failure("invalid_group_facts_query", invalid=True), ensure_ascii=False)
+
+    ensure_current_session()
+    observed_at = datetime.now().isoformat(timespec="seconds")
+    items = []
+    for row in rows:
+        account = str(row["user_id"])
+        card, nickname = row.get("card") or "", row.get("nickname") or ""
+        items.append({
+            "id": f"qq:{scope}:{account}", "kind": "group_facts", "read_state": "live",
+            "user_id": account, "is_bot": account == str(self_id), "role": row.get("role"),
+            "card": card, "nickname": nickname, "display_name": card or nickname,
+            "observed_at": observed_at, "excerpt": f"{card or nickname} ({account}) · {row.get('role') or '未知身份'}",
+        })
+    return json.dumps({"status": "ok", "items": items, "observed_at": observed_at}, ensure_ascii=False)
 
 
 async def inspect_memory(owner_id=None, run_id=None):

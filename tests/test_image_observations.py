@@ -54,17 +54,18 @@ class ImageObservationTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_execution_retains_visual_evidence_but_not_old_thought(self):
         manager = proactive.ProactiveManager()
-        manager._last_think[7] = "用户明确要求根据图片内容回复"
         source = models.Message("user", "[甲] 图片1: 私密截图描述\n\n用户消息: 今天真倒霉")
+        old_plan = models.Message("assistant", "用户明确要求根据图片内容回复", is_thinking=True)
         with (
-            patch.object(proactive.memory_manager, "get_history", AsyncMock(return_value=[source])),
+            patch.object(proactive.memory_manager, "get_history", AsyncMock(return_value=[old_plan, source])),
             patch.object(proactive.memory_manager, "get_session_model", return_value=""),
             patch.object(proactive, "build_context_messages", AsyncMock(return_value=[])) as build,
             patch.object(proactive.model_manager, "run_turn", AsyncMock(return_value="太惨了")),
         ):
             await manager.generate_proactive_response(7, source.content, trigger_message=source.content)
         arguments = build.await_args.kwargs
-        self.assertEqual(arguments["think_context"], "")
+        self.assertNotIn("think_context", arguments)
+        self.assertEqual(arguments["history"], [source])
         self.assertIn("私密截图描述", arguments["history"][0].content)
         self.assertNotIn("私密截图描述", arguments["recent_context"])
         self.assertIn("今天真倒霉", arguments["history"][0].content)

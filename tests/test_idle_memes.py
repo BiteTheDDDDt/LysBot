@@ -9,6 +9,7 @@ import nonebot
 nonebot.init()
 
 from src.plugins.llm_chat import idle_memes as idle
+from src.plugins.llm_chat.planner import PlannerDecision, ReplyPart
 
 
 class IdleMemeTests(unittest.IsolatedAsyncioTestCase):
@@ -25,7 +26,7 @@ class IdleMemeTests(unittest.IsolatedAsyncioTestCase):
             ctx['last_sent'] = {'id': 1, 'description': '独立笑话', 'topic': 'funny', 'message_id': 2}
             return '已发送'
         try:
-            with patch.object(idle, 'datetime', SimpleNamespace(now=lambda: SimpleNamespace(hour=12), fromisoformat=datetime.fromisoformat)), patch.object(idle, 'activity', AsyncMock(return_value=(old, old))), patch.object(idle.meme_manager, 'is_on_cooldown', return_value=False), patch.object(idle.meme_manager, '_get_db', AsyncMock(return_value=db)), patch.object(idle.meme_manager, 'pick_random', AsyncMock(return_value=(1, 'path.jpg', '独立笑话'))) as pick, patch.object(tools, 'send_picked_meme', AsyncMock(side_effect=sent)) as send, patch.object(idle.memory_manager, 'add_message', AsyncMock()) as remember, patch.object(idle.proactive_manager, 'mark_just_spoke'):
+            with patch.object(idle, 'datetime', SimpleNamespace(now=lambda: SimpleNamespace(hour=12), fromisoformat=datetime.fromisoformat)), patch.object(idle, "plan_chat_action", AsyncMock(return_value=PlannerDecision(parts=[ReplyPart("meme")]))), patch.object(idle, 'activity', AsyncMock(return_value=(old, old))), patch.object(idle.meme_manager, 'is_on_cooldown', return_value=False), patch.object(idle.meme_manager, '_get_db', AsyncMock(return_value=db)), patch.object(idle.meme_manager, 'pick_random', AsyncMock(return_value=(1, 'path.jpg', '独立笑话'))) as pick, patch.object(tools, 'send_picked_meme', AsyncMock(side_effect=sent)) as send, patch.object(idle.memory_manager, 'add_message', AsyncMock()) as remember, patch.object(idle.proactive_manager, 'mark_just_spoke'):
                 self.assertTrue(await idle.share_idle_meme(AsyncMock(), 98765))
                 self.assertFalse(await idle.share_idle_meme(AsyncMock(), 98765))
             pick.assert_awaited_once_with(None, meme_kind='joke')

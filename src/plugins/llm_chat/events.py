@@ -175,7 +175,6 @@ async def _handle_poke_chat(bot: Bot, user_id: int, group_id: int = None):
         group_id=group_id,
         user_content=poke_message,
         user_name=sender_name,
-        related_user_id=user_id,
         reply_policy=POKE_REPLY,
         planner_decision=decision,
         planned_meme=planned_meme,
@@ -189,7 +188,8 @@ async def _handle_poke_chat(bot: Bot, user_id: int, group_id: int = None):
             reply_policy=POKE_REPLY, required_tool=decision.required_tool,
             media_followup=decision.media_followup,
         )
-        cleaned_response = enforce_reply_budget(clean_response(response_text), POKE_REPLY)
+        reply_policy = getattr(response_text, "reply_policy", None) or POKE_REPLY
+        cleaned_response = enforce_reply_budget(clean_response(response_text), reply_policy)
         from .tools import (
             _meme_context,
             format_sent_meme_for_memory,
@@ -213,7 +213,7 @@ async def _handle_poke_chat(bot: Bot, user_id: int, group_id: int = None):
 
         sent_turn = await send_response_turn(
             text=cleaned_response, decision=decision, planned_meme=planned_meme,
-            reply_policy=POKE_REPLY, send_text=send_text,
+            reply_policy=reply_policy, send_text=send_text,
         )
         cleaned_response = sent_turn.text_for_memory
         history_text = cleaned_response

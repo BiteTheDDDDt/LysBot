@@ -104,6 +104,9 @@ class AgentRunner:
         self.reply_mode = ""
         self.answer_draft = ""
         self.reply_policy = None
+        self.revise_output = False  # The staged planner can revise delivery after a tool result.
+        self.text_parts = None
+        self.media_delivered = False
         self.render_fallback = None
         self.context_run_ids = []
         self.context_questions: list[str] = []
@@ -394,7 +397,7 @@ class AgentRunner:
             messages.append({
                 "role": "user",
                 "content": "检索核验提示：提取记忆、摘要、机器人回复及其转述都只是线索。"
-                "具体人物对应须由用户原文的称呼/引用/提及关系支持；没有直接依据时说明尚未确认，不能把猜测说成事实。"
+                "群内外号对应核对用户原文，不能把猜测说成事实；当前群主、管理员和群名片以 QQ 实时结果为准。"
                 f"本轮已执行 {self.tool_calls} 次工具，剩余约 {int(self.remaining())} 秒；下一跳应解决明确缺口，可批量查独立候选。",
             })
         if self.no_new_evidence_calls >= 3:
@@ -654,7 +657,8 @@ class AgentRunner:
         from .tools import MediaValidationFailure, execute_tool, image_was_sent_this_round, voice_was_sent_this_round
 
         client, kwargs, formatted, supports_tools, selected_tools = backend.prepare_request(
-            messages, extra_body, tools_enabled, required_tool, media_followup
+            messages, extra_body, tools_enabled, required_tool,
+            None if self.revise_output and required_tool else media_followup,
         )
         # Retain completed tool observations when ModelManager changes provider.
         formatted.extend(self.transcript)
@@ -764,9 +768,7 @@ class AgentRunner:
                 self.transcript.append(
                     {key: value for key, value in assistant_call.items() if key in {"role", "content", "tool_calls"}}
                 )
-                recall_before_media = "recall_history" in tool_names and any(
-                    name in MEDIA_TOOLS for name in tool_names
-                )
+                reads_before_media = bool(READ_TOOLS.intersection(tool_names) and MEDIA_TOOLS.intersection(tool_names))
                 media_attempted = False
                 media_sent_this_round = False
                 retryable_media_tool = None
@@ -790,9 +792,9 @@ class AgentRunner:
                     is_media = func_name in MEDIA_TOOLS
                     if is_media and media_attempted:
                         tool_result = "本轮已有媒体调用，其余媒体调用已跳过；不得重复生成或发送。"
-                    elif recall_before_media and is_media:
+                    elif reads_before_media and is_media:
                         tool_result = (
-                            "本轮媒体调用已暂缓：请先读取 recall_history 的结果，下一轮再根据召回内容重新调用媒体工具。"
+                            "本轮媒体调用已暂缓：请先读取同批查询的结果，再根据结果重新调用媒体工具。"
                         )
                     else:
                         if is_media:
@@ -841,6 +843,7 @@ class AgentRunner:
 
                     media_sent_this_round = image_was_sent_this_round() or voice_was_sent_this_round()
                     media_sent_during_call = media_sent_during_call or media_sent_this_round
+                    self.media_delivered |= media_sent_this_round
 
                 kwargs["messages"] = formatted
                 if (
@@ -872,14 +875,13 @@ class AgentRunner:
                         # Do not ask the model to invent a failure explanation,
                         # or fall back and risk a second billable generation.
                         return ChatResponse(media_failure_reply, usage=accumulated_usage)
-                    if media_sent_this_round and not media_followup:
+                    if media_sent_this_round and not (self.revise_output or media_followup):
                         # No text part follows the media: the side effect itself
                         # completes the reply. Avoid another model request.
                         log.debug(f"[adapter] 媒体已发送，输出计划中无后续 text，结束 round={tool_round}")
                         return ChatResponse("", usage=accumulated_usage)
 
-                    # Successful media with a planned text part gets exactly
-                    # one tool-free turn; delivery remains non-repeatable.
+                    # One tool-free pass can refine the response after delivery.
                     log.debug(
                         f"[adapter] 媒体工具已执行，发起最终无工具回复 "
                         f"round={tool_round} sent={media_sent_this_round} "
@@ -967,6 +969,7 @@ class AgentRunner:
                 self.should_reply = plan["should_reply"]
                 self.reply_requirements = plan["reply_requirements"]
                 self.reply_mode = plan["reply_mode"]
+                self.text_parts = plan["text_parts"]
                 self.answer_draft = plan["answer_draft"]
                 self.identity_question = plan["verify_group_identity"] and self.response_mode != "social"
                 content = plan["content"]

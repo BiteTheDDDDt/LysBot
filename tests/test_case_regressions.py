@@ -24,9 +24,14 @@ class CaseRegressions(unittest.IsolatedAsyncioTestCase):
 
         decision = PlannerDecision(parts=[ReplyPart("image")])
         tools.set_image_context(99, 42, bot=SimpleNamespace())
-        create = AsyncMock(return_value=make_response(FakeToolMessage([
-            make_tool_call("image", "generate_image", {"prompt": "一只鸽子"}),
-        ])))
+        close_plan = SimpleNamespace(content=json.dumps({
+            "response_mode": "social", "verify_group_identity": False,
+            "content": "图片已发送，媒体已经足够", "text_parts": 0,
+        }), tool_calls=[])
+        create = AsyncMock(side_effect=[
+            make_response(FakeToolMessage([make_tool_call("image", "generate_image", {"prompt": "一只鸽子"})])),
+            make_response(close_plan),
+        ])
         adapter = models.OpenAICompatibleAdapter(
             "openai:gpt-5.6-sol", "test-key", "https://example.com/v1", "gpt-5.6-sol",
         )
@@ -54,9 +59,11 @@ class CaseRegressions(unittest.IsolatedAsyncioTestCase):
                 media_followup=decision.media_followup,
             )
         self.assertEqual(str(response), "")
-        create.assert_awaited_once()
+        self.assertEqual(create.await_count, 2)
         execute.assert_awaited_once()
-        self.assertIn("generate_image", {tool["function"]["name"] for tool in create.await_args.kwargs["tools"]})
+        self.assertIn("generate_image", {tool["function"]["name"] for tool in create.await_args_list[0].kwargs["tools"]})
+        self.assertFalse(create.await_args_list[1].kwargs.get("tools"))
+        self.assertEqual(response.agent_run.text_parts, 0)
         self.assertEqual(list(response.agent_run.actions.values())[0]["status"], "sent")
         self.assertGreaterEqual(response.agent_run.deadline,
                                 response.agent_run.started_at + config.chat_media_turn_timeout)
@@ -125,7 +132,6 @@ class CaseRegressions(unittest.IsolatedAsyncioTestCase):
         from src.plugins.llm_chat.planner import PlannerDecision, ReplyPart
         question = '解释代码里的 "[表情: 捂脸笑]"'
         with (
-            patch.object(config, "enable_sentiment_analysis", False),
             patch.object(context_builder.memory_manager, "get_fixed_context_memory", AsyncMock(return_value={})),
         ):
             messages = await context_builder.build_context_messages(

@@ -37,7 +37,7 @@ async def exercise(root, directory, model_port, requests):
         LLM_CHAT_DATA_DIR=str(directory / "data"),
         LLM_CHAT_DATABASE_PATH=str(directory / "data/history.db"),
         ENABLE_MESSAGE_AGGREGATION="false",
-        ENABLE_SENTIMENT_ANALYSIS="false", ENABLE_IMPORTANT_INFO="false",
+        ENABLE_IMPORTANT_INFO="false",
         ENABLE_DAILY_BRIEFING="false", ENABLE_DAILY_NEWS_BROADCAST="false",
         ENABLE_MODEL_CARD="false", NETWORK_MAX_RETRIES="0",
     )
@@ -89,8 +89,8 @@ async def exercise(root, directory, model_port, requests):
                     "message_type": "group", "sub_type": "normal", "message_id": 1,
                     "group_id": 7, "user_id": 42, "anonymous": None,
                     "message": [{"type": "at", "data": {"qq": "999"}},
-                                {"type": "text", "data": {"text": "你好"}}],
-                    "raw_message": "[CQ:at,qq=999]你好", "font": 0,
+                                {"type": "text", "data": {"text": "你好，你当前的群名片是什么"}}],
+                    "raw_message": "[CQ:at,qq=999]你好，你当前的群名片是什么", "font": 0,
                     "sender": {"user_id": 42, "nickname": "测试成员", "card": "测试成员",
                                "sex": "unknown", "age": 0, "area": "", "level": "",
                                "role": "member", "title": ""},
@@ -107,7 +107,12 @@ async def exercise(root, directory, model_port, requests):
                         elif name == "get_group_list":
                             data = [{"group_id": 7, "group_name": "测试群"}]
                         elif name == "get_group_member_info":
-                            data = {"user_id": 42, "nickname": "测试成员", "card": "测试成员"}
+                            params = action["params"]
+                            if int(params["user_id"]) == 999:
+                                assert int(params["group_id"]) == 7 and params["no_cache"] is True
+                                data = {"user_id": 999, "nickname": "磷叶石", "card": "磷叶石 [smoke-live-model]", "role": "member"}
+                            else:
+                                data = {"user_id": 42, "nickname": "测试成员", "card": "测试成员"}
                         elif name == "get_group_member_list":
                             data = [{"user_id": 42, "nickname": "测试成员", "card": "测试成员"}]
                         elif name in {"send_group_msg", "send_msg"}:
@@ -116,6 +121,9 @@ async def exercise(root, directory, model_port, requests):
                         await connection.send(json.dumps({"status": "ok", "retcode": 0,
                                                           "data": data, "echo": action.get("echo")}))
                 assert "你好" in json.dumps(reply, ensure_ascii=False), "Expected generated greeting"
+                assert "磷叶石 [smoke-live-model]" in json.dumps(reply, ensure_ascii=False)
+                assert any(message.get("role") == "tool" and "smoke-live-model" in str(message.get("content"))
+                           for item in requests for message in item.get("messages", [])), "Live group facts were not read"
                 assert requests, "Model endpoint was not called"
                 assert all(item["model"] == "smoke-general" for item in requests)
                 for item in requests:
@@ -123,7 +131,7 @@ async def exercise(root, directory, model_port, requests):
                     assert not names & {"search_web", "send_voice", "generate_image"}
                 assert any(message.get("role") == "tool" and "extension_owner_verified" in str(message.get("content"))
                            for item in requests for message in item.get("messages", [])), "Extension was not executed"
-                print(f"PASS: real startup, OneBot message/reply, {len(requests)} general-model calls, no optional tools, master extension executed")
+                print(f"PASS: real startup, OneBot message/reply, {len(requests)} general-model calls, live group card read, master extension executed")
         except Exception:
             print(f"Smoke-test log: {log_path}")
             print("\n".join(log_path.read_text(encoding="utf-8", errors="replace").splitlines()[-30:]))
@@ -151,20 +159,24 @@ def main():
             requests.append(payload)
             messages = payload.get("messages", [])
             text = "\n".join(str(message.get("content", "")) for message in messages)
-            if "动作规划器" in text:
+            if "参与规划器" in text:
                 content = json.dumps({"action": "reply", "reply_mode": "sentence",
                                       "parts": [{"type": "text"}], "reason": "回应问候"})
             elif "你负责理解本轮请求" in text:
-                content = json.dumps({"response_mode": "social", "verify_group_identity": False,
-                                      "content": "回应对方的问候", "reply_mode": "sentence",
+                content = json.dumps({"response_mode": "factual", "verify_group_identity": False,
+                                      "content": "回复问候，并给出 QQ 返回的当前群名片 磷叶石 [smoke-live-model]",
+                                      "reply_mode": "sentence", "text_parts": 1,
                                       "reply_requirements": [], "should_reply": True})
             else:
-                content = "你好，我是法斯。"
+                content = "你好，我现在的群名片是磷叶石 [smoke-live-model]"
             message = {"role": "assistant", "content": content}
             if "你负责理解本轮请求" in text and not any(m.get("role") == "tool" for m in messages):
                 message = {"role": "assistant", "content": None, "tool_calls": [{
                     "id": "smoke-tool-call", "type": "function",
                     "function": {"name": "smoke_owner", "arguments": "{}"},
+                }, {
+                    "id": "smoke-group-facts", "type": "function",
+                    "function": {"name": "get_group_facts", "arguments": '{"scope":"bot"}'},
                 }]}
             response = json.dumps({
                 "id": "smoke-completion", "object": "chat.completion", "created": int(time.time()),

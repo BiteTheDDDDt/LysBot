@@ -101,7 +101,6 @@ class IncomingMessageExpansionTests(unittest.IsolatedAsyncioTestCase):
         saved = AsyncMock(side_effect=stored_message)
         with (
             patch.object(chat.config, "enable_group_repeat", False),
-            patch.object(chat.config, "enable_sentiment_analysis", False),
             patch.object(chat.memory_manager, "add_message", saved),
             patch.object(chat.memory_manager, "enrich_message", AsyncMock(return_value=True)) as enriched,
             patch.object(chat.proactive_manager, "try_proactive", AsyncMock()),
@@ -358,7 +357,6 @@ class IncomingMessageExpansionTests(unittest.IsolatedAsyncioTestCase):
 
         with (
             patch.object(chat.config, "enable_group_repeat", False),
-            patch.object(chat.config, "enable_sentiment_analysis", False),
             patch.object(chat.memory_manager, "add_message", AsyncMock(side_effect=stored_message)) as add_message,
             patch.object(chat.memory_manager, "enrich_message", AsyncMock(return_value=True)) as enriched,
             patch.object(

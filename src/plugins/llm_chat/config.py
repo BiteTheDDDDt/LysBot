@@ -88,7 +88,6 @@ class Config(BaseModel):
     proactive_msg_threshold: int = 50
     proactive_cooldown: int = 3600
     idle_meme_enabled: bool = True
-    enable_sentiment_analysis: bool = True  # 是否启用情感分析
 
     @field_validator("briefing_time", "news_broadcast_time")
     @classmethod
@@ -173,10 +172,10 @@ class RuntimeConfig(Config):
     important_info_max_attempts: int = 10  # 达到上限后保留为死信，不再无限请求上游
     max_retrieve_summaries: int = 1      # 检索时最多返回的摘要数
     max_retrieve_info: int = 2           # 检索时每种类型最多返回的重要信息数
-    recent_summaries: int = 1            # 最近摘要数（直接加入上下文，不做检索）
-    fixed_context_max_participants: int = 5  # 固定上下文最多注入多少位近期成员资料
+    recent_summaries: int = 1            # 旧版检索优先返回的最近摘要数
+    fixed_context_max_participants: int = 5  # 每次读取固定记忆的成员上限
     fixed_context_info_per_type: int = 1  # 每位成员、每种信息最多注入多少条
-    fixed_context_max_info: int = 20  # 单轮固定人物信息总上限
+    fixed_context_max_info: int = 20  # 每次读取固定人物信息的总上限
     memory_emotion_max_age_hours: int = 24  # 更早的情绪仍可召回，但不再固定注入
     important_info_types: List[str] = [
         "user_preference",   # 用户偏好
@@ -191,7 +190,6 @@ class RuntimeConfig(Config):
     idle_meme_threshold: int = 7200
     idle_meme_cooldown: int = 86400
     enable_reply_judge: bool = True  # 是否启用被动发言判断
-    sentiment_total_timeout: float = 10.0  # 后台共享分析任务上限，不阻塞聊天入口
     meme_max_per_topic: int = 100
 
 config = RuntimeConfig(**get_plugin_config(Config).model_dump(exclude_unset=True))
@@ -243,7 +241,7 @@ MEDIA_WITH_TEXT_USAGE_PROMPT = """
 
 def get_tool_usage_prompt(
     required_tool: str = "",
-    media_followup: bool = True,
+    media_followup: bool | None = True,
 ) -> str:
     """返回与本次实际工具清单一致的 system prompt。"""
     base=BASE_TOOL_USAGE_PROMPT if agentic_enabled() else (
@@ -277,6 +275,9 @@ def get_tool_usage_prompt(
         media_prompt = IMAGE_TOOL_USAGE_PROMPT
     else:
         return base
+
+    if media_followup is None:
+        return base + media_prompt + "\n- 媒体发送后读取回执；仅媒体已足够时用 text_parts=0，有必要说明用 text_parts=1。"
 
     followup_prompt = (
         MEDIA_WITH_TEXT_USAGE_PROMPT

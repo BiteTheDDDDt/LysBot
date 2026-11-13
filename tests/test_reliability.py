@@ -117,7 +117,7 @@ class MemoryReliabilityTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(commands, 'memory_manager', self.manager), patch.object(memory_module.config, 'enable_important_info', True):
             text = await commands._build_jrrp_memory_context(101, 71, '甲')
         self.assertIn('h:4:messages:', text)
-        self.assertIn('h:4:important_info:', text)
+        self.assertNotIn('h:4:important_info:', text)
         self.assertIn('乙刚加薪', text)
         self.assertIn('别人的经历不能归给当前用户', text)
 

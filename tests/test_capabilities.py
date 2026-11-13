@@ -1,6 +1,8 @@
 import asyncio
+import json
 import unittest
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
 import nonebot
 
@@ -86,6 +88,41 @@ class TaskOwnershipTests(unittest.IsolatedAsyncioTestCase):
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
             conversation.start()
+
+    async def test_group_facts_use_actual_group_and_preserve_displayed_model_suffix(self):
+        from src.plugins.llm_chat.model_types import current_session_id
+
+        bot = SimpleNamespace(
+            self_id=999,
+            get_group_member_info=AsyncMock(return_value={
+                "user_id": 999, "card": "磷叶石 [GPT-6.1 Sol]", "nickname": "磷叶石", "role": "member",
+            }),
+            get_group_member_list=AsyncMock(return_value=[
+                {"user_id": 2, "nickname": "管理员", "role": "admin"},
+                {"user_id": 3, "nickname": "普通成员", "role": "member"},
+                {"user_id": 4, "card": "群主名片", "nickname": "群主", "role": "owner"},
+            ]),
+        )
+        token = current_session_id.set("group_7")
+        try:
+            tools.set_poke_context(7, 42, bot)
+            own = json.loads(await tools.execute_tool("get_group_facts", {"scope": "bot"}))
+            self.assertEqual(own["items"][0]["display_name"], "磷叶石 [GPT-6.1 Sol]")
+            self.assertTrue(own["items"][0]["is_bot"])
+            bot.get_group_member_info.assert_awaited_once_with(group_id=7, user_id=999, no_cache=True)
+            roles = json.loads(await tools.execute_tool("get_group_facts", {"scope": "leadership"}))
+            self.assertEqual([item["role"] for item in roles["items"]], ["owner", "admin"])
+            bot.get_group_member_list.assert_awaited_once_with(group_id=7, no_cache=True)
+            bad = json.loads(await tools.execute_tool("get_group_facts", {"scope": "bot", "group_id": 8}))
+            self.assertEqual(bad["status"], "invalid_arguments")
+            tools.set_poke_context(8, 42, bot)
+            bad = json.loads(await tools.execute_tool("get_group_facts", {"scope": "bot"}))
+            self.assertEqual(bad["status"], "unavailable")
+            self.assertNotIn("get_group_facts", {t["function"]["name"] for t in tools.get_chat_tools()})
+            self.assertEqual(bot.get_group_member_info.await_count, 1)
+        finally:
+            tools.clear_poke_context()
+            current_session_id.reset(token)
 
     async def test_tool_error_does_not_leak_activity_or_arguments(self):
         async def failing(query):

@@ -132,19 +132,6 @@ def _build_jrrp_recent_context(history, group_id: int = None, sender_name: str =
     return "\n".join(recent_lines)
 
 
-def _format_jrrp_info_items(title: str, items: list[dict], generation: int = 0) -> str:
-    """格式化 jrrp 使用的记忆条目"""
-    if not items:
-        return ""
-
-    lines = []
-    for item in items:
-        time_prefix = f"<time={memory_manager._format_time(item.get('created_at'))}> " if item.get("created_at") else ""
-        source = f" [h:{generation}:important_info:{item['id']}]" if item.get("id") is not None else ""
-        lines.append(f"- {time_prefix}{item['type']}: {item['content']}{source}")
-    return f"【{title}】\n" + "\n".join(lines)
-
-
 def _current_2bot_jrrp_day_index() -> int:
     return int(datetime.now().timestamp() / 86400 + 0.5)
 
@@ -171,45 +158,7 @@ async def _build_jrrp_memory_context(user_id: int, group_id: int = None, sender_
     generation = int(row[0]) if row else 0
     recent_context = _build_jrrp_recent_context(history, group_id=group_id, sender_name=sender_name, user_id=user_id, generation=generation)
 
-    related_memory = {"summaries": [], "important_info": []}
-    if not group_id:
-        query_parts = [f"{sender_name} 的今日人品", "今日运势", "最近聊天状态"]
-        if recent_context:
-            query_parts.append(recent_context)
-        memory_query = "\n".join(query_parts)
-
-        related_memory = await memory_manager.retrieve_related(
-            session_id,
-            memory_query,
-            user_id=user_id,
-            max_summaries=max(config.max_retrieve_summaries, 1),
-            max_info=1,
-        )
-    direct_user_info = await memory_manager.get_recent_important_info(session_id, user_id, limit_per_type=1)
-    if group_id:
-        direct_user_info = [item for item in direct_user_info if item.get("user_id") == user_id]
-
-    deduped_info = []
-    seen = set()
-    for item in direct_user_info + related_memory["important_info"]:
-        key = (item["type"], item["content"])
-        if key in seen:
-            continue
-        seen.add(key)
-        deduped_info.append(item)
-
     sections = []
-    user_info_text = _format_jrrp_info_items("数据库中的用户信息", deduped_info, generation=generation)
-    if user_info_text:
-        sections.append(user_info_text)
-
-    if related_memory["summaries"]:
-        summary_text = "【相关历史摘要】\n" + "\n---\n".join([
-            f"[{s['time_range']}]: {s['content']}"
-            for s in related_memory["summaries"]
-        ])
-        sections.append(summary_text)
-
     if recent_context:
         sections.append("【本人最近发言】\n" + recent_context)
     if group_id:

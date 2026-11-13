@@ -361,6 +361,19 @@ READ_KNOWLEDGE_TOOL = {
     },
 }
 
+GROUP_FACTS_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "get_group_facts",
+        "description": "从 QQ 实时读取当前群的事实。bot 返回你当前显示的群名片（可能含模型名）与 QQ 昵称；"
+        "leadership 返回群主和管理员；member 按当前群已知的 QQ 号读取该成员的群名片。群号由会话提供。",
+        "parameters": {"type": "object", "properties": {
+            "scope": {"type": "string", "enum": ["bot", "leadership", "member"]},
+            "user_id": {"type": "string", "description": "仅 member 时填写当前群成员的 QQ 号。"},
+        }, "required": ["scope"], "additionalProperties": False},
+    },
+}
+
 CAPABILITIES = {
     cap.name: cap
     for cap in (
@@ -369,6 +382,7 @@ CAPABILITIES = {
         Capability(VOICE_TOOL, media=True),
         Capability(IMAGE_GENERATION_TOOL, media=True),
         Capability(RECALL_HISTORY_TOOL, read_only=True, memory_scoped=True),
+        Capability(GROUP_FACTS_TOOL, read_only=True),
         Capability(READ_HISTORY_TOOL, read_only=True, memory_scoped=True, agentic_only=True),
         Capability(SEARCH_KNOWLEDGE_TOOL, read_only=True),
         Capability(READ_KNOWLEDGE_TOOL, read_only=True),

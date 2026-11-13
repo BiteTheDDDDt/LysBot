@@ -12,7 +12,6 @@ class VoiceIntentTests(unittest.IsolatedAsyncioTestCase):
     async def plan(self, message, payload, direct=True):
         model = AsyncMock(return_value=json.dumps(payload))
         with patch.object(planner, '_resolve_planner_context', AsyncMock(return_value='h1k1: 坐飞机不敢查jrrp')), \
-             patch.object(planner.config, 'enable_sentiment_analysis', False), \
              patch.object(planner.model_manager, 'chat', model):
             decision = await planner.plan_chat_action(session_id='group_77', group_id=77,
                                                       current_message=message, is_direct=direct)

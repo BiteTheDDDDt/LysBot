@@ -20,6 +20,7 @@ class ReplyPolicy:
     scene: str = "chat"
     detailed: bool = False
     tiny: bool = False
+    text_parts: int | None = None
 
     @property
     def max_chars(self) -> int:
@@ -46,6 +47,10 @@ class ReplyPolicy:
                 "消息条数遵循本轮动作规划；两个 text 时分两条表达同样的简短内容，不增加篇幅。"
                 "简短解释保留结论和关键原因即可；必要条件、纠错和来源可适当超出，不为字数删掉关键含义。"
             )
+        if self.text_parts == 2:
+            length_rule += "本轮发两条，在两条完整内容之间留一个空行。"
+        elif self.text_parts == 1:
+            length_rule += "本轮只发一条消息，可以在消息内分段。"
         return (
             f"【本轮回复规则：{self.scene} / {'极短' if self.tiny else '详细' if self.detailed else '简短'}】\n"
             + length_rule

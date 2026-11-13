@@ -37,7 +37,7 @@ class IncomingPipelineTests(unittest.IsolatedAsyncioTestCase):
         self.patches.enter_context(patch.object(chat, 'memory_manager', self.manager))
         self.patches.enter_context(patch.object(chat, 'GroupMessageEvent', FakeGroupEvent))
         self.patches.enter_context(patch.object(conversation, '_closing', False))
-        for setting in ('enable_summary', 'enable_important_info', 'enable_group_repeat', 'enable_sentiment_analysis'):
+        for setting in ('enable_summary', 'enable_important_info', 'enable_group_repeat'):
             self.patches.enter_context(patch.object(chat.config, setting, False))
         for method in ('add_recent_message', 'increment_counter'):
             self.patches.enter_context(patch.object(chat.proactive_manager, method))
@@ -178,26 +178,6 @@ class IncomingPipelineTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(event._llm_record_obsolete)
         self.assertFalse(await chat.should_respond(event))
         self.bot.send.assert_not_awaited()
-
-    async def test_slow_sentiment_does_not_block_direct_record_or_reply_eligibility(self):
-        entered, release = asyncio.Event(), asyncio.Event()
-        self.gates.append(release)
-
-        async def analyze(*args, **kwargs):
-            entered.set()
-            await release.wait()
-
-        event = self.event("请帮我看一下这个问题")
-        with (
-            patch.object(chat.config, "enable_sentiment_analysis", True),
-            patch.object(chat.sentiment_analyzer, "analyze", AsyncMock(side_effect=analyze)),
-        ):
-            await asyncio.wait_for(chat.record_group_message(self.bot, event), timeout=5)
-            await asyncio.wait_for(entered.wait(), timeout=5)
-            self.assertEqual(len(await self.rows()), 1)
-            self.assertTrue(await chat.should_respond(event))
-            release.set()
-            await self.finish_background()
 
     async def test_reset_after_recorder_returns_rejects_the_same_event_at_chat_matcher(self):
         event = self.event("请回答这个问题")

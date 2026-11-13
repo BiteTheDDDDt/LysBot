@@ -59,7 +59,6 @@ async def _llm_chat_cleanup():
     log = _gl.bind(category="llm")
     from . import conversation, health
     from .chat import close_chat_tasks, close_incoming_tasks
-    from .sentiment import sentiment_analyzer
     from .multimodal import close_downloads
     from .proactive import proactive_manager
     await health.close()
@@ -67,7 +66,6 @@ async def _llm_chat_cleanup():
         proactive_manager.cancel_wait(group_id)
     await close_chat_tasks()
     await close_incoming_tasks()
-    await sentiment_analyzer.close()
     await conversation.close()
     await close_downloads()
     from .models import model_manager

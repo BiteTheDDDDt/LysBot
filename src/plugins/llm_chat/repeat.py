@@ -5,8 +5,6 @@ import random
 from collections import defaultdict, deque
 from time import time
 
-from nonebot import logger
-
 from .config import config
 
 # Internal repeat tuning; not operator-facing settings.
@@ -15,8 +13,6 @@ MIN_COUNT = 3
 BASE_PROBABILITY = 0.3
 PROBABILITY_INCREMENT = 0.2
 COOLDOWN_SECONDS = 600
-TEXT_ONLY = True
-EXCLUDE_SELF = True
 
 
 class RepeatManager:
@@ -51,12 +47,9 @@ class RepeatManager:
         prob = BASE_PROBABILITY + extra * PROBABILITY_INCREMENT
         return min(prob, 1.0)
 
-    def try_repeat(self, group_id: int, user_id: int, self_id: str, text: str) -> bool:
-        """记录消息并判断是否触发复读"""
+    def is_candidate(self, group_id: int, text: str) -> bool:
+        """Record a message and sample a repeat opportunity for the planner."""
         if not config.enable_group_repeat:
-            return False
-
-        if EXCLUDE_SELF and str(user_id) == str(self_id):
             return False
 
         cleaned = text.strip()
@@ -77,27 +70,10 @@ class RepeatManager:
         counts[cleaned] += 1
 
         count = counts[cleaned]
-        if count < MIN_COUNT:
-            return False
+        return count >= MIN_COUNT and random.random() < self._calc_probability(count)
 
-        probability = self._calc_probability(count)
-        roll = random.random()
-
-        if roll >= probability:
-            logger.debug(
-                f"[群复读] 未命中: group_id={group_id}, "
-                f"text={cleaned[:50]}..., count={count}, "
-                f"prob={probability:.0%}, roll={roll:.2f}"
-            )
-            return False
-
-        self._group_cooldown_until[group_id] = now + COOLDOWN_SECONDS
-        logger.info(
-            f"[群复读] 触发复读: group_id={group_id}, "
-            f"text={cleaned[:50]}..., count={count}, "
-            f"prob={probability:.0%}, roll={roll:.2f}"
-        )
-        return True
+    def mark_attempted(self, group_id: int) -> None:
+        self._group_cooldown_until[group_id] = time() + COOLDOWN_SECONDS
 
 
 repeat_manager = RepeatManager()

@@ -111,6 +111,7 @@ async def run_stages(manager, messages, *, model, role, caller, session_id,
     from .conversation_style import PLANNING_STYLE, RENDERING_STYLE, build_rendering_handoff
 
     runner = current_run.get()
+    runner.revise_output = True
     planning_messages = [*messages, Message(role="system", content=(
         PLANNING_STYLE + "\n较长任务可用 report_progress 告知已有发现或实际阻碍，不为进展拖延任务。"
     ))]
@@ -119,8 +120,12 @@ async def run_stages(manager, messages, *, model, role, caller, session_id,
         session_id=session_id, allow_fallback=allow_fallback,
         required_tool=required_tool, media_followup=media_followup, tools_enabled=True,
     )
+    if runner.media_delivered:
+        followup = media_followup if runner.text_parts is None else runner.text_parts > 0
+        if not followup:
+            return ChatResponse("", usage=getattr(plan, "usage", None))
     if not str(plan).strip():
-        return plan  # A delivered media-only turn needs no text renderer.
+        return plan
     runner.planning_result = str(plan)[:4000]
     await runner.checkpoint()
     await runner.validate_scope()
@@ -133,6 +138,12 @@ async def run_stages(manager, messages, *, model, role, caller, session_id,
     policy = runner.reply_policy
     if policy and policy.scene in {"chat", "multiuser", "close", "proactive", "poke"} and not required_tool and runner.reply_mode:
         runner.reply_policy = replace(policy, detailed=runner.reply_mode == "detailed" and policy.scene in {"chat", "multiuser"}, tiny=runner.reply_mode == "tiny")
+    if runner.reply_policy and runner.text_parts:
+        policy_for_delivery = runner.reply_policy
+        count = min(runner.text_parts, policy_for_delivery.max_text_parts)
+        if required_tool or policy_for_delivery.scene in {"close", "jrrp"}:
+            count = 1
+        runner.reply_policy = replace(policy_for_delivery, text_parts=count)
     draft = str(plan) if runner.identity_verdict else runner.answer_draft
     if runner.response_mode == "factual" and draft and not is_tool_call_text(draft):
         runner.render_fallback = _attach_response_context(
