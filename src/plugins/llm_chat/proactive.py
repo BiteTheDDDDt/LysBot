@@ -29,6 +29,7 @@ class RecentMessage:
     content: str
     timestamp: float
     user_id: int
+    message_id: int | None = None
 
 
 class ProactiveManager:
@@ -166,7 +167,7 @@ class ProactiveManager:
             return True
         return time.time() - self._last_spoke[group_id] > IDLE_THRESHOLD_SECONDS
 
-    def add_recent_message(self, group_id: int, content: str, user_id: int):
+    def add_recent_message(self, group_id: int, content: str, user_id: int, message_id: int | None = None):
         """添加最近消息到缓存"""
         from .image_observations import unsolicited_view
         content = unsolicited_view(content)
@@ -176,7 +177,8 @@ class ProactiveManager:
         self._recent_messages[group_id].append(RecentMessage(
             content=content,
             timestamp=time.time(),
-            user_id=user_id
+            user_id=user_id,
+            message_id=message_id,
         ))
 
         # 清理超过检查窗口的旧消息
@@ -184,7 +186,13 @@ class ProactiveManager:
         self._recent_messages[group_id] = [
             m for m in self._recent_messages[group_id]
             if m.timestamp > cutoff
-        ]
+        ][-100:]
+
+    def get_recent_targets(self, group_id: int):
+        from .qq_addressing import MessageTarget
+        cutoff = time.time() - CHECK_WINDOW_SECONDS
+        return [MessageTarget(m.message_id, m.user_id, m.content)
+                for m in self._recent_messages.get(group_id, [])[-12:] if m.timestamp > cutoff]
 
     def get_recent_messages_text(self, group_id: int, window_seconds: int = None) -> str:
         """获取最近检查窗口内的消息文本
@@ -434,9 +442,10 @@ class ProactiveManager:
                 )
 
                 set_poke_context(group_id=group_id, user_id=user_id, bot=bot)
-                set_meme_context(group_id=group_id, user_id=user_id, bot=bot)
-                set_voice_context(group_id=group_id, user_id=user_id, bot=bot)
-                set_image_context(group_id=group_id, user_id=user_id, bot=bot)
+                addressing = planner_decision.addressing
+                set_meme_context(group_id=group_id, user_id=user_id, bot=bot, addressing=addressing)
+                set_voice_context(group_id=group_id, user_id=user_id, bot=bot, addressing=addressing)
+                set_image_context(group_id=group_id, user_id=user_id, bot=bot, addressing=addressing)
                 try:
                     poke_sent = False
                     if planner_decision.action == "poke":
@@ -500,7 +509,7 @@ class ProactiveManager:
                                 from .agent_runner import deliver_reply as _deliver_agent_reply
                                 await _deliver_agent_reply(response, followup_text, lambda: bot.send_group_msg(
                                     group_id=group_id,
-                                    message=followup_text,
+                                    message=addressing.text(followup_text, first=False),
                                 ), bot=bot, group_id=group_id)
                                 sent_followup = followup_text
                             except asyncio.CancelledError as exc:
@@ -546,7 +555,8 @@ class ProactiveManager:
                         async def send_text_reply(text: str, is_first: bool) -> None:
                             ensure_send_allowed(group_id)
                             from .agent_runner import deliver_reply as _deliver_agent_reply
-                            await _deliver_agent_reply(generated_response, text, lambda: bot.send_group_msg(group_id=group_id, message=text), bot=bot, group_id=group_id)
+                            payload = addressing.text(text, first=is_first)
+                            await _deliver_agent_reply(generated_response, text, lambda: bot.send_group_msg(group_id=group_id, message=payload), bot=bot, group_id=group_id)
 
                         sent_turn = await send_response_turn(
                             text=response,

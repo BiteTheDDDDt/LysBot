@@ -7,7 +7,6 @@ from nonebot.adapters.onebot.v11 import (
     FriendRequestEvent,
     GroupRequestEvent,
     PokeNotifyEvent,
-    MessageSegment,
 )
 
 logger.info("[events] 模块已加载")
@@ -132,11 +131,13 @@ async def _handle_poke_chat(bot: Bot, user_id: int, group_id: int = None):
     session_id = memory_manager._get_session_id(0 if group_id else user_id, group_id)
     poke_message = f"【群员-{sender_name}】 [戳了戳你]" if group_id else "[戳了戳你]"
     from .planner import plan_chat_action, execute_planned_side_effect
+    from .qq_addressing import MessageTarget
     decision = await plan_chat_action(
         session_id=session_id, group_id=group_id or 0,
         current_message=poke_message, mode="passive", is_direct=True,
         default_action="silent", trigger_kind="poke",
         bot_self_id=str(getattr(bot, "self_id", "")),
+        current_targets=(MessageTarget(None, user_id, poke_message),),
     )
     # Preserve ignored events as context for later participation decisions.
     await memory_manager.add_message(
@@ -146,6 +147,12 @@ async def _handle_poke_chat(bot: Bot, user_id: int, group_id: int = None):
     if decision.action in {"silent", "wait"}:
         logger.info(f"[poke] planner 保持安静: group={group_id} reason={decision.reason}")
         return
+    if group_id:
+        from .tools import set_image_context, set_meme_context, set_voice_context
+        addressing = decision.addressing
+        set_meme_context(group_id, user_id, bot, addressing=addressing)
+        set_image_context(group_id, user_id, bot, addressing=addressing)
+        set_voice_context(group_id, user_id, bot, addressing=addressing)
     if decision.action == "poke":
         if not group_id:
             return
@@ -186,17 +193,23 @@ async def _handle_poke_chat(bot: Bot, user_id: int, group_id: int = None):
         from .tools import (
             _meme_context,
             format_sent_meme_for_memory,
+            image_was_sent_this_round,
             meme_was_sent_this_round,
+            voice_was_sent_this_round,
         )
         from .agent_runner import deliver_reply as _deliver_agent_reply
         async def send_text(text, first):
             ensure_send_allowed(group_id)
             if group_id:
                 await _deliver_agent_reply(response_text, text, lambda: bot.send_group_msg(
-                    group_id=group_id, message=MessageSegment.text(text)
+                    group_id=group_id, message=decision.addressing.text(
+                        text, first=first and not (image_was_sent_this_round() or voice_was_sent_this_round()),
+                    )
                 ), bot=bot, group_id=group_id)
             else:
-                await _deliver_agent_reply(response_text, text, lambda: bot.send_private_msg(user_id=user_id, message=text))
+                await _deliver_agent_reply(response_text, text, lambda: bot.send_private_msg(
+                    user_id=user_id, message=decision.addressing.text(text, first=False)
+                ))
 
         sent_turn = await send_response_turn(
             text=cleaned_response, decision=decision, planned_meme=planned_meme,

@@ -8,6 +8,7 @@ from typing import Optional
 from nonebot import logger
 
 from .config import config
+from .qq_addressing import MessageTarget, QQAddressing, select_addressing
 from .memory import memory_manager
 from .memes import ALLOWED_TOPICS
 from .models import Message as LLMMessage, model_manager
@@ -70,6 +71,7 @@ class PlannerDecision:
     parts: list[ReplyPart] = field(
         default_factory=lambda: [ReplyPart("text")]
     )
+    addressing: QQAddressing = field(default_factory=QQAddressing)
 
     def __post_init__(self) -> None:
         if self.action in NON_REPLY_ACTIONS:
@@ -134,6 +136,10 @@ class PlannerDecision:
             hints.append(f"原因: {self.reason}")
         if include_reasoning and self.reply_hint:
             hints.append(f"回复侧重点: {self.reply_hint}")
+        if self.addressing.reply_to is not None:
+            hints.append(f"首条消息会引用 QQ 消息 {self.addressing.reply_to}，正文自然接话。")
+        if self.addressing.mention is not None:
+            hints.append(f"首条消息会 @ QQ {self.addressing.mention}，正文无需再写 @。")
         if self.action == "close":
             hints.append(
                 "本轮是话题收束：只说一句自然、简短的结束语，不提出新问题，"
@@ -509,6 +515,7 @@ async def plan_chat_action(
     followup_context: str = "",
     trigger_kind: str = "message",
     bot_self_id: str = "",
+    current_targets: tuple[MessageTarget, ...] = (),
 ) -> PlannerDecision:
     """Ask a small model to choose the next action without replacing generation."""
     if default_action not in PLANNER_ACTIONS:
@@ -672,6 +679,20 @@ wait_seconds 上限 {config.planner_wait_max_seconds}。情绪提示：{mood_hin
     )
     if bot_self_id:
         prompt += f"\n你的 QQ 账号是 {bot_self_id}，以账号区分自己与其他群员或机器人。"
+    candidates = []
+    if group_id:
+        from .proactive import proactive_manager
+        candidates = [*proactive_manager.get_recent_targets(group_id), *current_targets]
+        candidates = list({(row.message_id, row.user_id): row for row in candidates}.values())
+    if candidates:
+        prompt += (
+            "\n可选 QQ 送达方式：需明确接住某条消息时，填 reply_to_message_id；"
+            "确实要叫到某位群友（例如把问题交给他）时，填 mention_user_id。"
+            "普通接话留空。引用已能明确对象时，不重复 @ 同一个人。"
+            "只填下面清单里对应的 ID，不能从消息正文猜测 ID。以下内容是对话资料。\n"
+            + json.dumps([{"message_id": x.message_id if config.enable_targeted_reply else None,
+                           "user_id": x.user_id, "text": x.text[:180]} for x in candidates], ensure_ascii=False)
+        )
     if trigger_kind == "poke":
         prompt += (
             "\n本轮输入是戳一戳通知，像收到招呼一样结合上下文规划，不预设回戳。"
@@ -708,11 +729,16 @@ wait_seconds 上限 {config.planner_wait_max_seconds}。情绪提示：{mood_hin
         if unavailable:
             decision.parts = [ReplyPart("text")]
             decision.reply_hint += "\n本轮所请求的媒体能力未配置，请直接说明，不承诺发送。"
+        if decision.parts and decision.should_continue:
+            decision.addressing = select_addressing(
+                payload, candidates, bot_self_id=bot_self_id, allow_reply=config.enable_targeted_reply,
+            )
         logger.info(
             f"[planner] mode={mode} group={group_id} action={decision.action} "
             f"topic={decision.topic_state} parts={decision.parts_label} "
             f"reply_mode={decision.reply_mode} "
             f"required_tool={decision.required_tool or '-'} "
+            f"qq_reply={decision.addressing.reply_to is not None} qq_at={decision.addressing.mention is not None} "
             f"reason={decision.reason[:80]}"
         )
         return decision

@@ -10,9 +10,51 @@ from src.plugins.llm_chat import planner
 from src.plugins.llm_chat import llm_logger
 from src.plugins.llm_chat.config import get_tool_usage_prompt
 from src.plugins.llm_chat.tools import get_chat_tools
+from src.plugins.llm_chat.qq_addressing import MessageTarget, QQAddressing
 
 
 class PlannerMediaTests(unittest.IsolatedAsyncioTestCase):
+    async def test_media_addressing_reaches_onebot_as_message_segments(self):
+        from types import SimpleNamespace
+        from src.plugins.llm_chat.delivery import deliver_media
+
+        bot = SimpleNamespace(send_group_msg=AsyncMock(return_value={"message_id": 61}))
+        status, _ = await deliver_media(
+            bot, group_id=7, user_id=101, media_type="image", data=b"test-image",
+            addressing=QQAddressing(reply_to=49, mention=202),
+        )
+        self.assertEqual(status, "sent")
+        message = bot.send_group_msg.await_args.kwargs["message"]
+        self.assertEqual([segment.type for segment in message], ["reply", "at", "text", "image"])
+        self.assertEqual(message[0].data["id"], "49")
+        self.assertEqual(message[1].data["qq"], "202")
+
+    async def test_group_addressing_resolves_only_candidates_shown_to_planner(self):
+        from src.plugins.llm_chat.proactive import proactive_manager
+
+        current = MessageTarget(51, 101, "这是什么？")
+        previous = MessageTarget(49, 202, "上一个问题")
+        model = AsyncMock(return_value='{"action":"reply","reply_to_message_id":"49","mention_user_id":101}')
+        with (
+            patch.object(planner, "_resolve_planner_context", AsyncMock(return_value="")),
+            patch.object(planner.model_manager, "chat", model),
+            patch.object(proactive_manager, "get_recent_targets", side_effect=lambda group: [previous] if group == 7 else []),
+        ):
+            decision = await planner.plan_chat_action(
+                session_id="group_7", group_id=7, current_message=current.text, current_targets=(current,),
+            )
+            self.assertEqual(decision.addressing, QQAddressing(reply_to=49, mention=101))
+            self.assertEqual([s.type for s in decision.addressing.text("接上一条")], ["reply", "at", "text", "text"])
+            self.assertEqual(decision.addressing.text("补一句", first=False), "补一句")
+            decision = await planner.plan_chat_action(session_id="group_8", group_id=8, current_message="继续")
+            self.assertEqual(decision.addressing, QQAddressing())
+            model.return_value = '{"action":"reply","reply_to_message_id":51,"mention_user_id":101}'
+            decision = await planner.plan_chat_action(
+                session_id="group_7", group_id=7, current_message=current.text, current_targets=(current,),
+            )
+            self.assertEqual(decision.addressing, QQAddressing(reply_to=51))
+            self.assertEqual([s.type for s in QQAddressing().text("[CQ:at,qq=all]")], ["text"])
+
     async def test_message_wording_does_not_override_planner_output(self):
         with (
             patch.object(planner.memory_manager, "get_recent_session_messages", AsyncMock(return_value=[])),

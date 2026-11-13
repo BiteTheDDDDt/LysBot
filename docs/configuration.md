@@ -44,6 +44,8 @@ MODEL_FALLBACK="google:gemini-3.5-flash-lite | openrouter:nvidia/nemotron-3-ultr
 
 主动接话、复读、表情、冷群梗图、jrrp 和戳一戳保留为内置互动行为。静音命令和掉线邮件已从新版移除。
 
+群聊 planner 可以引用本轮或本群最近消息，也可以 @ 最近发言者。目标来自 QQ 事件，选中的引用与 @ 附在本轮首条回复上。设置 `ENABLE_TARGETED_REPLY=false` 可关闭原生引用。此前按插入消息数触发引用的 `TARGETED_REPLY_MIN_INTERVENING_MESSAGES` 已弃用。
+
 `ENABLE_DAILY_BRIEFING`、`ENABLE_DAILY_NEWS_BROADCAST`、`ENABLE_MODEL_CARD` 默认为 false。新闻要求前两项同时开启并配置搜索模型；群像仅在生图可用时生成。配置冲突会在启动时说明。
 
 ## 本地检索

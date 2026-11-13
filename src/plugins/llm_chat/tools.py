@@ -20,6 +20,7 @@ from .capabilities import (
     MEMORY_TOOLS as MEMORY_TOOLS,
 )
 from .delivery import deliver_media
+from .qq_addressing import QQAddressing
 from .image_references import ImageReference, image_reference_store
 
 logger = logging.getLogger(__name__)
@@ -148,16 +149,15 @@ def set_meme_context(
     group_id: Optional[int],
     user_id: int,
     bot=None,
-    reply_message_id: Optional[int] = None,
-    should_use_reply=None,
+    *,
+    addressing: QQAddressing = QQAddressing(),
     directed: bool = False,
 ):
     _meme_context.set({
         "group_id": group_id,
         "user_id": user_id,
         "bot": bot,
-        "reply_message_id": reply_message_id,
-        "should_use_reply": should_use_reply,
+        "addressing": addressing,
         "directed": directed,
         "pick_status": "not_attempted",
         "sent_in_round": False,  # 单轮去重
@@ -186,11 +186,13 @@ _voice_context: ContextVar[Optional[Dict[str, Any]]] = ContextVar("voice_context
 _voice_last_sent_at: Dict[str, float] = {}
 
 
-def set_voice_context(group_id: Optional[int], user_id: int, bot=None) -> None:
+def set_voice_context(group_id: Optional[int], user_id: int, bot=None, *,
+                      addressing: QQAddressing = QQAddressing()) -> None:
     _voice_context.set({
         "group_id": group_id,
         "user_id": user_id,
         "bot": bot,
+        "addressing": addressing,
         "sent_in_round": False,
     })
 
@@ -235,6 +237,7 @@ _image_last_sent_at: Dict[str, float] = {}
 
 def set_image_context(
     group_id: Optional[int], user_id: int, bot=None, *,
+    addressing: QQAddressing = QQAddressing(),
     reference_images: Optional[list[ImageReference]] = None,
     missing_reference_images: bool = False,
     allow_auto_reference: bool = True,
@@ -246,6 +249,7 @@ def set_image_context(
         "group_id": group_id,
         "user_id": user_id,
         "bot": bot,
+        "addressing": addressing,
         "sent_in_round": False,
         "references": references,
         "current_reference_ids": list(current),
@@ -435,22 +439,13 @@ async def send_picked_meme(planned: Optional[Dict[str, Any]], allow_reply: bool 
             logger.warning(f"[send_meme] 文件不存在 id={meme_id} path={file_path}")
             return "empty"
         # 用 base64 内联发图，兼容跨机部署的 NapCat（file:// 只能同机）
-        import base64 as _b64
         raw = await asyncio.to_thread(p.read_bytes)
-        b64 = _b64.b64encode(raw).decode("ascii")
-        reply_prefix = ""
-        reply_message_id = ctx.get("reply_message_id")
-        should_use_reply = ctx.get("should_use_reply")
-        if allow_reply and reply_message_id is not None and callable(should_use_reply):
-            try:
-                if should_use_reply():
-                    reply_prefix = f"[CQ:reply,id={reply_message_id}]"
-            except Exception as e:
-                logger.debug(f"[send_meme] 判断 reply 引用失败: {e}")
+        from nonebot.adapters.onebot.v11 import MessageSegment
+        addressing = ctx["addressing"] if allow_reply else QQAddressing()
         ensure_send_allowed(group_id)
         send_result = await bot.send_group_msg(
             group_id=group_id,
-            message=f"{reply_prefix}[CQ:image,file=base64://{b64}]",
+            message=addressing.prefix() + MessageSegment.image(raw),
         )
     except Exception as e:
         logger.error(f"[send_meme] 发送失败 id={meme_id}: {e}")
@@ -524,7 +519,8 @@ async def send_voice(text: str, emotion: str = "neutral") -> str:
 
     try:
         delivery_status, send_result = await deliver_media(
-            bot, group_id=group_id, user_id=user_id, media_type="voice", data=speech.wav_bytes)
+            bot, group_id=group_id, user_id=user_id, media_type="voice", data=speech.wav_bytes,
+            addressing=ctx.get("addressing", QQAddressing()))
     except Exception as exc:
         logger.error(f"[send_voice] QQ投递明确失败 scope={scope_key}: {exc}")
         return f"send_voice 发送失败：{exc}"
@@ -666,7 +662,8 @@ async def generate_image(
 
     try:
         delivery_status, send_result = await deliver_media(
-            bot, group_id=group_id, user_id=user_id, media_type="image", data=generated.image_bytes)
+            bot, group_id=group_id, user_id=user_id, media_type="image", data=generated.image_bytes,
+            addressing=ctx.get("addressing", QQAddressing()))
     except Exception as exc:
         logger.error(f"[generate_image] QQ投递明确失败 scope={scope_key}: {exc}")
         return f"generate_image 发送失败：{exc}"

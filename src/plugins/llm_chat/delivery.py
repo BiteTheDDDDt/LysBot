@@ -7,6 +7,7 @@ from .conversation import ensure_send_allowed
 from .delivery_outbox import DeliveryOutbox
 from .execution import ExecutionPolicy, execution_scope
 from .config import config
+from .qq_addressing import QQAddressing
 
 SEND_POLICY = ExecutionPolicy("delivery.send", permission="send",
                               timeout=lambda: max(1.0, float(config.delivery_timeout)), check_result=False)
@@ -27,7 +28,7 @@ async def deliver_once(send, *, session_id=None):
     return "sent", receipt
 
 
-async def deliver_media(bot, *, group_id, user_id, media_type, data):
+async def deliver_media(bot, *, group_id, user_id, media_type, data, addressing: QQAddressing = QQAddressing()):
     """Send an already generated artifact, independently from its producer."""
     from nonebot.adapters.onebot.v11 import Message, MessageSegment
     from .agent_runner import record_tool_delivery
@@ -35,7 +36,7 @@ async def deliver_media(bot, *, group_id, user_id, media_type, data):
     if media_type not in {"image", "voice"}:
         raise ValueError(f"Unsupported media type: {media_type}")
     segment = MessageSegment.image(data) if media_type == "image" else MessageSegment.record(data)
-    message = Message([segment])
+    message = addressing.prefix() + segment if group_id else Message([segment])
     async def send():
         if group_id:
             return await bot.send_group_msg(group_id=group_id, message=message)

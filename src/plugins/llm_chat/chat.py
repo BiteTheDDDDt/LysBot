@@ -26,6 +26,7 @@ from .reply_policy import (
     select_reply_policy,
 )
 from .planner import PlannerDecision, execute_planned_side_effect, plan_chat_action
+from .qq_addressing import MessageTarget, QQAddressing
 from .proactive import proactive_manager
 from .repeat import TEXT_ONLY as REPEAT_TEXT_ONLY, repeat_manager
 from .turns import is_meme_only, prepare_planned_meme, send_response_turn
@@ -138,6 +139,8 @@ async def _resume_after_planner_wait(
                 session_id=f"group_{group_id}",
                 group_id=group_id,
                 current_message=message,
+                current_targets=_event_message_targets(event, message),
+                bot_self_id=str(getattr(bot, "self_id", "")),
                 recent_context=recent_context,
                 mode="passive",
                 is_direct=direct,
@@ -219,6 +222,20 @@ def _get_event_message_id(event: MessageEvent) -> Optional[int]:
         return None
 
 
+def _event_message_targets(event: MessageEvent, message: str, *, user_id: int | None = None) -> tuple[MessageTarget, ...]:
+    current = MessageTarget(_get_event_message_id(event), user_id if user_id is not None else event.user_id,
+                            current_request_text(event, message))
+    reply = getattr(event, "reply", None)
+    if reply is not None:
+        message_id = _get_event_message_id(reply)
+        sender_id = getattr(getattr(reply, "sender", None), "user_id", None)
+        if message_id is not None and isinstance(sender_id, int):
+            quoted = getattr(reply, "message", None)
+            excerpt = quoted.extract_plain_text() if isinstance(quoted, Message) else ""
+            return current, MessageTarget(message_id, sender_id, excerpt or "本轮所引用的消息")
+    return (current,)
+
+
 def _mark_group_message_seen(event: GroupMessageEvent) -> int:
     group_id = event.group_id
     next_order = group_message_orders.get(group_id, 0) + 1
@@ -241,37 +258,6 @@ def _get_group_message_order(event: GroupMessageEvent) -> int:
         if order is not None:
             return order
     return group_message_orders.get(event.group_id, 0)
-
-
-def _should_use_targeted_reply(event: MessageEvent, group_message_order: int) -> bool:
-    if not config.enable_targeted_reply or not isinstance(event, GroupMessageEvent):
-        return False
-    if _get_event_message_id(event) is None:
-        return False
-
-    threshold = max(1, int(config.targeted_reply_min_intervening_messages))
-    intervening_count = max(0, group_message_orders.get(event.group_id, 0) - group_message_order)
-    if intervening_count < threshold:
-        return False
-
-    logger.info(
-        f"[定向回复] 群 {event.group_id} 原消息后新增 {intervening_count} 条消息，"
-        f"使用 reply 引用 message_id={_get_event_message_id(event)}"
-    )
-    return True
-
-
-def _build_targeted_reply_message(event: MessageEvent, text: str, group_message_order: int) -> Message | str:
-    clean_text = (text or "").strip()
-    if not clean_text:
-        return clean_text
-    if not _should_use_targeted_reply(event, group_message_order):
-        return clean_text
-
-    return Message([
-        MessageSegment.reply(_get_event_message_id(event)),
-        MessageSegment.text(clean_text),
-    ])
 
 
 def _build_assistant_history_text(response_text: str, sent_meme: Optional[dict]) -> str:
@@ -406,18 +392,6 @@ async def _finalize_immediate_tool_turn(
         send_followup=send_followup,
         model_spec=model_spec,
     )
-
-
-def _get_targeted_reply_tool_context(
-    event: MessageEvent,
-    group_message_order: int,
-) -> tuple[Optional[int], Optional[Callable[[], bool]]]:
-    if not isinstance(event, GroupMessageEvent):
-        return None, None
-    message_id = _get_event_message_id(event)
-    if message_id is None:
-        return None, None
-    return message_id, lambda: _should_use_targeted_reply(event, group_message_order)
 
 
 def _drop_current_turn_from_history(
@@ -914,7 +888,7 @@ async def _enrich_group_record(bot, event, resolved, stored_message, sender_name
 
     from .image_observations import unsolicited_view
     proactive_content = unsolicited_view(formatted_content)
-    proactive_manager.add_recent_message(group_id, proactive_content, user_id)
+    proactive_manager.add_recent_message(group_id, proactive_content, user_id, _get_event_message_id(event))
     if not image_urls or plain_message.strip():
         proactive_manager.increment_counter(group_id)
 
@@ -1141,6 +1115,8 @@ async def handle_single_chat(bot: Bot, event: MessageEvent, message: str,
         planner_decision = await plan_chat_action(
             session_id=session_key(user_id, group_id), group_id=group_id or 0,
             current_message=message, mode="passive", is_direct=direct,
+            current_targets=_event_message_targets(event, message) if group_id else (),
+            bot_self_id=str(getattr(bot, "self_id", "")),
             has_images=bool(images_base64), faces=faces, default_action="reply" if direct else "silent",
             followup_context=followups.context(group_id) if not direct else "",
         )
@@ -1155,8 +1131,7 @@ async def handle_single_chat(bot: Bot, event: MessageEvent, message: str,
                 return
         elif not planner_decision.should_continue:
             planner_decision.action = "reply"
-    group_message_order = _get_group_message_order(event) if group_id else 0
-    reply_message_id, should_use_reply = _get_targeted_reply_tool_context(event, group_message_order)
+    addressing = planner_decision.addressing if group_id else QQAddressing()
 
     # 设置工具上下文（供戳一戳 / 表情包 / 语音 / 生图等工具使用）
     from .tools import (
@@ -1172,9 +1147,10 @@ async def handle_single_chat(bot: Bot, event: MessageEvent, message: str,
     set_poke_context(group_id=group_id, user_id=user_id, bot=bot,
                      current_user_text=getattr(event, "get_plaintext", lambda: "")(),
                      history_request_texts=[getattr(event, "_llm_memory_content", "")])
-    set_voice_context(group_id=group_id, user_id=user_id, bot=bot)
+    set_voice_context(group_id=group_id, user_id=user_id, bot=bot, addressing=addressing)
     set_image_context(
         group_id=group_id, user_id=user_id, bot=bot,
+        addressing=addressing,
         reference_images=_current_image_references(event, images_base64),
         missing_reference_images=_missing_image_references(event, images_base64),
     )
@@ -1182,14 +1158,13 @@ async def handle_single_chat(bot: Bot, event: MessageEvent, message: str,
         group_id=group_id,
         user_id=user_id,
         bot=bot,
-        reply_message_id=reply_message_id,
-        should_use_reply=should_use_reply,
+        addressing=addressing,
         directed=not group_id or _group_message_direction(event, event.get_plaintext())[0],
     )
 
     try:
         await _do_handle_single_chat(
-            bot, event, message, images_base64, faces, user_id, group_id, planner_decision, group_message_order
+            bot, event, message, images_base64, faces, user_id, group_id, planner_decision
         )
     finally:
         # 清理工具上下文
@@ -1202,8 +1177,7 @@ async def handle_single_chat(bot: Bot, event: MessageEvent, message: str,
 async def _do_handle_single_chat(bot: Bot, event: MessageEvent, message: str,
                                   images_base64: list, faces: list, user_id: int,
                                   group_id: int = None,
-                                  planner_decision: Optional[PlannerDecision] = None,
-                                  group_message_order: int = 0):
+                                  planner_decision: Optional[PlannerDecision] = None):
     """实际处理单条聊天消息的逻辑"""
     reply_policy = select_reply_policy(
         [current_request_text(event, message)], decision=planner_decision,
@@ -1328,7 +1302,7 @@ async def _do_handle_single_chat(bot: Bot, event: MessageEvent, message: str,
 
         async def send_media_followup(text: str) -> None:
             ensure_send_allowed(group_id)
-            await _deliver_agent_reply(response_text,text,lambda:bot.send(event,text), bot=bot, group_id=group_id)
+            await _deliver_agent_reply(response_text,text,lambda:bot.send(event,QQAddressing().text(text)), bot=bot, group_id=group_id)
 
         # 媒体已由工具发送；Planner 可选择只发媒体或再补一句文字。
         if await _finalize_immediate_tool_turn(
@@ -1341,7 +1315,8 @@ async def _do_handle_single_chat(bot: Bot, event: MessageEvent, message: str,
             return
 
         async def send_text_reply(text: str, is_first: bool) -> None:
-            payload = _build_targeted_reply_message(event, text, group_message_order) if is_first else text
+            addressing = planner_decision.addressing if group_id and planner_decision else QQAddressing()
+            payload = addressing.text(text, first=is_first)
             ensure_send_allowed(group_id)
             await _deliver_agent_reply(response_text,text,lambda:bot.send(event,payload), bot=bot, group_id=group_id)
 
@@ -1409,6 +1384,9 @@ async def handle_merged_chat(bot: Bot, group_id: int, pending_messages: list[Pen
     decision = await plan_chat_action(
         session_id=f"group_{group_id}", group_id=group_id, current_message=combined,
         mode="passive", is_direct=direct,
+        current_targets=tuple(target for pm in pending_messages
+                              for target in _event_message_targets(pm.event, pm.message, user_id=pm.user_id)),
+        bot_self_id=str(getattr(bot, "self_id", "")),
         followup_context=followups.context(group_id) if not direct else "",
         has_images=any(pm.images_base64 for pm in pending_messages),
         faces=[face for pm in pending_messages for face in pm.faces], default_action="reply" if direct else "silent",
@@ -1455,13 +1433,10 @@ async def handle_merged_chat(bot: Bot, group_id: int, pending_messages: list[Pen
     for pm in pending_messages:
         pm.planner_decision = decision
 
-    # 聚合批次的工具与定向回复上下文以第一条触发消息为准。
+    # 工具调用者沿用首位发言者，消息引用与 @ 由 planner 选择。
     first_msg = pending_messages[0]
     primary_user_id = first_msg.user_id
-    reply_message_id, should_use_reply = _get_targeted_reply_tool_context(
-        first_msg.event,
-        first_msg.group_message_order,
-    )
+    addressing = decision.addressing
 
     # 设置工具上下文（供戳一戳 / 表情包 / 语音 / 生图等工具使用）
     from .tools import (
@@ -1478,9 +1453,10 @@ async def handle_merged_chat(bot: Bot, group_id: int, pending_messages: list[Pen
                      current_user_text=getattr(pending_messages[-1].event, "get_plaintext", lambda: "")() if len({pm.user_id for pm in pending_messages}) == 1 else "",
                      history_request_texts=[getattr(pm.event, "_llm_memory_content", "") for pm in pending_messages],
                      allow_sender_alias=len({pm.user_id for pm in pending_messages}) == 1)
-    set_voice_context(group_id=group_id, user_id=primary_user_id, bot=bot)
+    set_voice_context(group_id=group_id, user_id=primary_user_id, bot=bot, addressing=addressing)
     set_image_context(
         group_id=group_id, user_id=primary_user_id, bot=bot,
+        addressing=addressing,
         reference_images=[ref for pm in pending_messages for ref in _current_image_references(pm.event, pm.images_base64)],
         missing_reference_images=any(_missing_image_references(pm.event, pm.images_base64) for pm in pending_messages),
         allow_auto_reference=len({pm.user_id for pm in pending_messages}) == 1,
@@ -1489,8 +1465,7 @@ async def handle_merged_chat(bot: Bot, group_id: int, pending_messages: list[Pen
         group_id=group_id,
         user_id=primary_user_id,
         bot=bot,
-        reply_message_id=reply_message_id,
-        should_use_reply=should_use_reply,
+        addressing=addressing,
         directed=any(_group_message_direction(pm.event, getattr(pm.event, "get_plaintext", lambda: pm.message)())[0]
                      for pm in pending_messages),
     )
@@ -1616,7 +1591,7 @@ async def _do_handle_merged_chat(
 
         async def send_media_followup(text: str) -> None:
             ensure_send_allowed(group_id)
-            await _deliver_agent_reply(response_text,text,lambda:bot.send(first_msg.event,text), bot=bot, group_id=group_id)
+            await _deliver_agent_reply(response_text,text,lambda:bot.send(first_msg.event,QQAddressing().text(text)), bot=bot, group_id=group_id)
 
         # 图片或语音已发送；只有媒体后的 text part 才会得到收尾文字。
         if await _finalize_immediate_tool_turn(
@@ -1630,11 +1605,8 @@ async def _do_handle_merged_chat(
 
         # 发送回复（使用 bot.send 而不是 finish，因为不是在 matcher 中）
         async def send_text_reply(text: str, is_first: bool) -> None:
-            payload = (
-                _build_targeted_reply_message(first_msg.event, text, first_msg.group_message_order)
-                if is_first
-                else text
-            )
+            addressing = planner_decision.addressing if planner_decision else QQAddressing()
+            payload = addressing.text(text, first=is_first)
             ensure_send_allowed(group_id)
             await _deliver_agent_reply(response_text,text,lambda:bot.send(first_msg.event,payload), bot=bot, group_id=group_id)
 

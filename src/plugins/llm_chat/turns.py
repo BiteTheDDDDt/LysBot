@@ -174,7 +174,7 @@ async def send_response_turn(
     sent_meme: Optional[dict] = None
 
     for idx, (kind, payload) in enumerate(items):
-        is_first = idx == 0
+        is_first = not (sent_texts or sent_meme)
         try:
             if idx > 0:
                 await asyncio.sleep(random.uniform(*delay_range))

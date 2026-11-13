@@ -190,9 +190,7 @@ class Config(BaseModel):
     aggregation_max_messages: int = 5  # 单次聚合最多处理的消息数
     aggregation_max_wait_seconds: float = 15.0
 
-    # 群聊慢回复引用配置
-    enable_targeted_reply: bool = True  # 回复生成期间插入较多消息时，使用 QQ 回复引用原消息
-    targeted_reply_min_intervening_messages: int = 2  # 原消息之后新增至少 N 条同群消息才引用
+    enable_targeted_reply: bool = True  # 允许 planner 选择 QQ 引用回复
 
     # 群复读配置
     enable_group_repeat: bool = True  # 是否启用群复读

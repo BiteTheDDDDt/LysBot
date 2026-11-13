@@ -340,8 +340,7 @@ class ReplyDeliveryTests(unittest.IsolatedAsyncioTestCase):
              patch("src.plugins.llm_chat.model_identity.update_group_card_for_response", AsyncMock()):
             await events._handle_poke_chat(bot, 42, 99)
         payload = bot.send_group_msg.await_args.kwargs["message"]
-        self.assertEqual(payload.type, "text")
-        self.assertEqual(payload.data["text"], "痒啦")
+        self.assertEqual(payload, "痒啦")
 
     def tearDown(self):
         tools.clear_poke_context()
