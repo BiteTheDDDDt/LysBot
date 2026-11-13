@@ -8,6 +8,7 @@ import threading
 from pathlib import Path
 
 MODEL = "local:bge-small-zh-v1.5"
+DIMENSION = 512
 REVISION = "46fbe35fd4374a00fee7de77dfddaeb6dd6a2c59"
 REPOSITORY = "Qdrant/bge-small-zh-v1.5"
 FILES = {
@@ -24,7 +25,7 @@ _engine_key = None
 
 
 def validate_settings(settings):
-    if settings["model"] != MODEL or settings["revision"] != REVISION or settings["dimension"] != 512:
+    if settings["model"] != MODEL or settings["revision"] != REVISION or settings["dimension"] != DIMENSION:
         raise ValueError("local_embedding_model_revision_or_dimension_mismatch")
     if settings.get("task_policy") != POLICY or settings.get("artifacts") != FILES:
         raise ValueError("local_embedding_policy_mismatch")

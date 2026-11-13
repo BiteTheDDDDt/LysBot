@@ -43,11 +43,14 @@ class MinimumConfigTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("未配置", result)
 
     def test_embedding_identity_is_fixed(self):
-        value = Config(memory_embedding_model="remote:other", memory_embedding_dimensions=32,
-                       memory_embedding_revision="wrong")
-        self.assertEqual(value.memory_embedding_model, "local:bge-small-zh-v1.5")
-        self.assertEqual(value.memory_embedding_dimensions, 512)
-        self.assertEqual(value.memory_embedding_revision, "46fbe35fd4374a00fee7de77dfddaeb6dd6a2c59")
+        from src.plugins.llm_chat.memory_index import embedding_settings
+
+        self.assertFalse({"memory_embedding_model", "memory_embedding_dimensions",
+                          "memory_embedding_revision"} & Config.model_fields.keys())
+        value = embedding_settings()
+        self.assertEqual(value["model"], "local:bge-small-zh-v1.5")
+        self.assertEqual(value["dimension"], 512)
+        self.assertEqual(value["revision"], "46fbe35fd4374a00fee7de77dfddaeb6dd6a2c59")
 
     def test_news_dependency_is_explicit(self):
         with patch.object(config, "enable_daily_news_broadcast", True), \

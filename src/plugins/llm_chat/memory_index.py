@@ -20,7 +20,6 @@ from datetime import datetime
 from pathlib import Path
 
 
-from .config import config
 from .logging_setup import memory_logger as log
 
 CHUNK_VERSION = "windows-v1-8-800-2-128"
@@ -128,21 +127,17 @@ def generation(db, session_id: str) -> int:
 
 
 def embedding_settings() -> dict:
-    settings = {
-        "model": config.memory_embedding_model,
-        "dimension": config.memory_embedding_dimensions,
-        "revision": config.memory_embedding_revision,
+    from .local_embedding import DIMENSION, FILES, MODEL, POLICY, REVISION
+
+    return {
+        "model": MODEL,
+        "dimension": DIMENSION,
+        "revision": REVISION,
         "normalization": "l2",
         "chunk_version": CHUNK_VERSION,
+        "task_policy": POLICY,
+        "artifacts": dict(FILES),
     }
-    if config.memory_embedding_model.startswith("google:"):
-        settings["task_policy"] = "google-retrieval-v1"
-    if config.memory_embedding_model.startswith("local:"):
-        from .local_embedding import FILES, POLICY, validate_settings
-
-        settings.update(task_policy=POLICY, artifacts=dict(FILES))
-        validate_settings(settings)
-    return settings
 
 
 def embedding_version(settings: dict) -> str:

@@ -21,8 +21,7 @@ def main() -> int:
     output = Path(tempfile.mkdtemp(prefix="lysbot-tests-"))
     env = os.environ.copy()
     env.update(LLM_CHAT_DATA_DIR=str(output / "data"), LLM_CHAT_DATABASE_PATH=str(output / "data/history.db"), PYTHONUTF8="1", PYTHONDONTWRITEBYTECODE="1",
-               MEMORY_INDEX_ENABLED="false", MEMORY_EMBEDDING_MODEL="dashscope:text-embedding-v4",
-               MEMORY_EMBEDDING_REVISION="v4", MEMORY_EMBEDDING_DIMENSIONS="512")
+               MEMORY_INDEX_ENABLED="false")
     # Retry behavior is tested explicitly; unrelated failure tests must not sleep or consume mock outcomes twice.
     env.update(NETWORK_MAX_RETRIES="0")
     # Test-only fixtures keep concrete model names out of production routing code.

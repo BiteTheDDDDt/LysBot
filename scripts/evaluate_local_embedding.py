@@ -147,8 +147,6 @@ def main():
         LLM_CHAT_DATA_DIR=str(args.directory),
         LLM_CHAT_DATABASE_PATH=str(args.directory / "history.db"),
         MEMORY_INDEX_ENABLED="false",
-        MEMORY_EMBEDDING_MODEL="local:bge-small-zh-v1.5",
-        MEMORY_EMBEDDING_REVISION="46fbe35fd4374a00fee7de77dfddaeb6dd6a2c59",
         MEMORY_LOCAL_MODEL_DIR=str(args.model_directory.resolve()),
     )
     with asyncio.Runner() as runner:

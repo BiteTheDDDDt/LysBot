@@ -2,6 +2,10 @@
 
 在 `.env` 配置 `MASTER_QQ`、OneBot 的 `ACCESS_TOKEN`、`MODEL_GENERAL` 与 provider 凭据。master 在启动前映射为唯一的 NoneBot superuser，旧的 `SUPERUSERS` 不会扩大管理员范围。
 
+日常部署通常只需要模型、凭据、代理、人设、路径、定时任务及功能开关。按机器和账号情况也可调整生图额度、主要超时、本地向量线程数和主动发言频率。配置字段集中在 `src/plugins/llm_chat/config.py` 的 `Config`。
+
+升级时可以删去旧的 `ENABLE_SUMMARY`、`MAX_HISTORY_MESSAGES`、`SUMMARY_THRESHOLD`、`SUMMARY_MESSAGES` 和 `MEMORY_EMBEDDING_*`。原有默认摘要行为与向量模型保留。采样参数、上下文字数、工具轮次、缓存和定时补偿等细粒度参数改用代码里的默认值，旧环境变量中的自定义值将不再生效。Agentic search 通过 `AGENTIC_SEARCH_ENABLED` 全局控制，旧的 `AGENTIC_SEARCH_SESSIONS` 已移除。
+
 ## 模型
 
 模型配置写作 `provider:model_id`，备用链使用 ` | ` 分隔。当前适配器包括 `openai`、`deepseek`、`dashscope`、`google`、`anthropic`、`nvidia`、`openrouter`、`siliconflow`、`tencentmaas`、`volc`、`xiaomimimo` 和 `cliproxyapi`。具体模型可用性取决于账号与上游服务；不需要安装 CLIProxyAPI 才能运行。

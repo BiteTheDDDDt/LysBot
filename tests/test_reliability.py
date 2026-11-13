@@ -479,14 +479,18 @@ class ModelReliabilityTests(unittest.IsolatedAsyncioTestCase):
 class OperationalTests(unittest.TestCase):
     def test_config_loads_process_environment_without_dotenv_file(self):
         import nonebot
-        from src.plugins.llm_chat.config import Config
+        from src.plugins.llm_chat.config import Config, RuntimeConfig
         driver_config = nonebot.get_driver().config
-        with patch.object(driver_config, "_env_file", None), patch.dict(os.environ, {"OPENAI_API_KEY":"isolated-key", "CONTEXT_MAX_CHARS":"7654"}):
+        with patch.object(driver_config, "_env_file", None), patch.dict(os.environ, {
+            "OPENAI_API_KEY": "isolated-key", "CONTEXT_MAX_CHARS": "7654", "CHAT_TURN_TIMEOUT": "123",
+        }):
             # The global NoneBot config does not declare these plugin fields.
             with patch("nonebot.plugin.model_dump", return_value={}):
                 value = nonebot.get_plugin_config(Config)
         self.assertEqual(value.openai_api_key, "isolated-key")
-        self.assertEqual(value.context_max_chars, 7654)
+        self.assertEqual(value.chat_turn_timeout, 123)
+        runtime = RuntimeConfig(**value.model_dump(exclude_unset=True))
+        self.assertEqual(runtime.context_max_chars, 18000)
 
     def test_source_date_overrides_model_date_and_missing_evidence_is_rejected(self):
         raw = json.dumps({"items":[{"source_index":1,"published_at":"2026-09-05","summary":"A factual update"}]})

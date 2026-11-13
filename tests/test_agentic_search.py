@@ -447,9 +447,9 @@ class SearchStorageTests(unittest.IsolatedAsyncioTestCase):
             )
         self.assertIsNone(self.manager.search_index)
 
-    async def test_invalid_embedding_configuration_keeps_lexical_worker_available(self):
-        with patch.object(memory_module.config, "memory_embedding_model", "invalid-no-provider"):
-            index = MemoryIndex(self.manager._db_path)
+    async def test_invalid_embedding_settings_keep_lexical_worker_available(self):
+        index = MemoryIndex(self.manager._db_path)
+        index.settings["model"] = "invalid-no-provider"
         await index.start()
         try:
             self.assertFalse(index.vector_available)
@@ -640,10 +640,7 @@ class SearchStorageTests(unittest.IsolatedAsyncioTestCase):
                 json.dumps({**self.index.settings, "model": "dashscope:old-embedding"}),
                 "memory_embedding:" + self.index.version,
             ))
-        with (
-            patch.object(memory_module.config, "memory_embedding_model", "local:bge-small-zh-v1.5"),
-            patch("src.plugins.llm_chat.retrieval.embed", AsyncMock()) as embedding,
-        ):
+        with patch("src.plugins.llm_chat.retrieval.embed", AsyncMock()) as embedding:
             found = await self.search.search("group_7", query="图形处理器", mode="hybrid")
         embedding.assert_not_awaited()
         self.assertIn("local_embedding_rebuild_pending", found["warnings"])

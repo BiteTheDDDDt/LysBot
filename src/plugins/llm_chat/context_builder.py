@@ -208,7 +208,7 @@ async def build_context_messages(
     from .memory_trace import attach_refs, reference_labels
     await reference_labels(memory_manager._db_path, session_id, fixed_memory)
     from .config import agentic_enabled
-    if agentic_enabled(session_id):
+    if agentic_enabled():
         from .retrieval import HistorySearch
         profile=await HistorySearch(memory_manager._db_path).profile(session_id,participant_ids)
         if profile is not None:

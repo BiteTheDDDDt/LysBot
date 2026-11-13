@@ -357,11 +357,7 @@ class HistorySearch:
             warnings, vector = [], None
             embedding_started = time.monotonic()
             if mode in {"hybrid", "semantic"} and query and not exact_phrase:
-                if (
-                    config.memory_embedding_model.startswith("local:")
-                    and settings
-                    and not settings["model"].startswith("local:")
-                ):
+                if settings and not settings["model"].startswith("local:"):
                     # Selecting local inference must not incur remote query costs during a rebuild.
                     warnings.append("local_embedding_rebuild_pending")
                 elif settings:

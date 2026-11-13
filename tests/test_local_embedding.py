@@ -12,17 +12,12 @@ import nonebot
 nonebot.init()
 
 from src.plugins.llm_chat import local_embedding as local
-from src.plugins.llm_chat.config import config
 from src.plugins.llm_chat.memory_index import embed, embedding_settings, embedding_version
 
 
 class LocalEmbeddingTests(unittest.IsolatedAsyncioTestCase):
     def settings(self):
-        with (
-            patch.object(config, "memory_embedding_model", local.MODEL),
-            patch.object(config, "memory_embedding_revision", local.REVISION),
-        ):
-            return embedding_settings()
+        return embedding_settings()
 
     def test_windows_include_every_token_and_final_tail(self):
         for size in [0, 1, 447, 448, 449, 832, 833, 1701]:

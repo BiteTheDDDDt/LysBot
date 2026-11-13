@@ -53,41 +53,75 @@ class Config(BaseModel):
     google_tts_base_url: str = "https://generativelanguage.googleapis.com/v1beta"
     google_tts_voice: str = "Leda"
     google_tts_persona_prompt: str = ""  # 留空使用角色文件中的声音人设
-    google_tts_max_chars: int = 200
+    xiaomimimo_api_key: str = ""
+    xiaomimimo_base_url: str = "https://api.xiaomimimo.com/v1"
+
+    # Deployment controls and resource budgets.
     google_tts_request_timeout: float = 60.0
+    image_gen_request_timeout: float = 240.0
+    image_gen_daily_limit: int = 20  # 进程内每日生成上限；<=0 表示不限制
+    llm_request_timeout: float = 120.0  # OpenAI兼容接口单次请求超时（秒）
+    network_max_retries: int = 1  # 统一请求层重试，SDK重试保持关闭
+    agentic_search_enabled: bool = True
+    memory_local_model_dir: str = ""  # 空值使用数据目录下 models/bge-small-zh-v1.5；运行时不下载
+    memory_local_threads: int = 4  # ONNX CPU 线程数，1–8
+    memory_index_enabled: bool = True
+    chat_turn_timeout: float = 180.0  # 普通聊天整轮上限，包含 fallback 和工具
+    chat_media_turn_timeout: float = 600.0  # 已规划图片/语音的回合，含生成、发送与后处理
+    planner_total_timeout: float = 75.0  # 含20秒请求、等待及一次重试
+    trigger_words: List[str] = []
+    enable_daily_briefing: bool = False
+    briefing_time: str = "00:00"  # 触发时间 HH:MM
+    briefing_enable_portrait: bool = True  # 群像和漫画嵌入简报
+    briefing_reference_documents: dict[str, list[str]] = {}
+    briefing_portrait_timeout: float = 240  # 生图整条回退链的总等待上限
+    enable_daily_news_broadcast: bool = False
+    news_broadcast_time: str = "08:00"  # 触发时间 HH:MM
+    news_lookback_hours: int = 48  # 新闻发布时间窗口
+    news_max_items: int = 5  # 单群单次最多播报条数
+    enable_important_info: bool = True  # 是否启用重要信息提取
+    important_info_request_timeout: float = 15.0  # 后台单次尝试超时（秒），失败任务会持久化重试
+    enable_message_aggregation: bool = True  # 是否启用消息聚合
+    enable_targeted_reply: bool = True  # 允许 planner 选择 QQ 引用回复
+    enable_group_repeat: bool = True  # 是否启用群复读
+    enable_proactive: bool = True  # 是否启用主动发言
+    proactive_msg_threshold: int = 50
+    proactive_cooldown: int = 3600
+    idle_meme_enabled: bool = True
+    enable_sentiment_analysis: bool = True  # 是否启用情感分析
+
+    @field_validator("briefing_time", "news_broadcast_time")
+    @classmethod
+    def _valid_daily_time(cls, value: str) -> str:
+        """Fail fast on a typo instead of silently scheduling at 00:00."""
+        try:
+            hour, minute = (int(part) for part in str(value).strip().split(":"))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("时间必须是 HH:MM 格式") from exc
+        if not (0 <= hour <= 23 and 0 <= minute <= 59):
+            raise ValueError("时间必须在 00:00 到 23:59 之间")
+        return f"{hour:02d}:{minute:02d}"
+
+
+class RuntimeConfig(Config):
+    """Internal defaults are available to the implementation but not loaded from .env."""
+
+    google_tts_max_chars: int = 200
     google_tts_cooldown: float = 10.0
     google_tts_max_concurrency: int = 2
     image_gen_default_size: str = "1024x1024"
     image_gen_max_prompt_chars: int = 1000
-    image_gen_request_timeout: float = 240.0
     image_gen_cooldown: float = 60.0
     image_gen_max_concurrency: int = 1
-    image_gen_daily_limit: int = 20  # 进程内每日生成上限；<=0 表示不限制
     image_gen_max_bytes: int = 15 * 1024 * 1024
     image_gen_describe_output: bool = True  # 发送后用 vision 描述实际成品并写入记忆
-    xiaomimimo_api_key: str = ""
-    xiaomimimo_base_url: str = "https://api.xiaomimimo.com/v1"
-
-    @model_validator(mode="after")
-    def fixed_embedding_identity(self):
-        from .local_embedding import MODEL, REVISION
-        self.memory_embedding_model = MODEL
-        self.memory_embedding_revision = REVISION
-        self.memory_embedding_dimensions = 512
-        return self
-
-    # 模型参数配置（角色到模型的路由请见 roles.py）
     model_temperature: float = 1.0      # 温度：兼容仅接受 temperature=1 的模型
     model_top_p: float = 0.95           # 核采样：兼容固定要求 top_p=0.95 的模型
     model_frequency_penalty: float = 0  # 频率惩罚：减少重复内容
     model_presence_penalty: float = 0  # 存在惩罚：减少重复话题
     model_max_tokens: int = 10000        # 最大输出token数
-    llm_request_timeout: float = 120.0  # OpenAI兼容接口单次请求超时（秒）
-    network_max_retries: int = 1  # 统一请求层重试，SDK重试保持关闭
     network_retry_delay: float = 25.0
     llm_max_tool_rounds: int = 8  # 主模型按证据逐跳检索，媒体仍按发送约束执行
-    agentic_search_enabled: bool = True
-    agentic_search_sessions: List[str] = []  # 空列表=全部；否则仅指定 group_xxx/user_xxx
     agent_max_tool_calls: int = 16
     agent_read_concurrency: int = 3
     delivery_timeout: float = 30.0  # 单次QQ投递；超时记为未确认，不能自动重发
@@ -102,15 +136,6 @@ class Config(BaseModel):
     agent_progress_max_messages: int = 2
     followup_window_seconds: float = 120.0
     followup_max_turns: int = 3
-    memory_embedding_model: str = "local:bge-small-zh-v1.5"
-    memory_embedding_dimensions: int = 512
-    memory_embedding_revision: str = "46fbe35fd4374a00fee7de77dfddaeb6dd6a2c59"
-    memory_local_model_dir: str = ""  # 空值使用数据目录下 models/bge-small-zh-v1.5；运行时不下载
-    memory_local_threads: int = 4  # ONNX CPU 线程数，1–8
-    memory_index_enabled: bool = True
-    chat_turn_timeout: float = 180.0  # 普通聊天整轮上限，包含 fallback 和工具
-    chat_media_turn_timeout: float = 600.0  # 已规划图片/语音的回合，含生成、发送与后处理
-    planner_total_timeout: float = 75.0  # 含20秒请求、等待及一次重试
     summary_total_timeout: float = 60.0
     background_llm_total_timeout: float = 120.0
     context_max_chars: int = 18000
@@ -129,24 +154,8 @@ class Config(BaseModel):
     image_download_concurrency: int = 3
     incoming_images_limit: int = 6
     vision_cache_size: int = 256  # 图片内容识别缓存条数；<=0 表示关闭
-
-    # 触发词（为空表示不通过关键词触发）
-    trigger_words: List[str] = []
-
-    # 每日简报配置
-    enable_daily_briefing: bool = False
-    briefing_time: str = "00:00"  # 触发时间 HH:MM
     briefing_context_max_chars: int = 40000
-    briefing_enable_portrait: bool = True  # 群像和漫画嵌入简报
-    briefing_reference_documents: dict[str, list[str]] = {}
-    briefing_portrait_timeout: float = 240  # 生图整条回退链的总等待上限
-
-    # 每日新闻播报配置
-    enable_daily_news_broadcast: bool = False
-    news_broadcast_time: str = "08:00"  # 触发时间 HH:MM
     news_briefing_max_age_hours: int = 36  # 只消费最近发布且尚未播报的简报
-    news_lookback_hours: int = 48  # 新闻发布时间窗口
-    news_max_items: int = 5  # 单群单次最多播报条数
     news_interest_limit: int = 3  # 每份简报最多提取几个公共新闻兴趣点
     news_search_freshness_days: int = 7  # DashScope 搜索召回窗口（API 最小支持 7 天，之后再本地精确过滤）
     news_dedup_days: int = 7
@@ -157,17 +166,10 @@ class Config(BaseModel):
     daily_job_recovery_interval_minutes: int = 10  # 定时任务补偿检查间隔
     briefing_recovery_max_age_hours: int = 12  # 错过简报时间后最多允许补跑多久
     news_recovery_max_age_hours: int = 12  # 错过新闻时间后最多允许补跑多久
-
-    # 记忆配置 - 三层记忆体系
     max_history_messages: int = 50   # 短期记忆：保留最近N条消息
     summary_threshold: int = 100     # 摘要阈值：超过此消息数触发压缩
     summary_messages: int = 50       # 每次压缩的消息数
     enable_summary: bool = True      # 是否启用摘要压缩
-
-
-    # 长期记忆配置 - 多摘要 + 重要信息
-    enable_important_info: bool = True  # 是否启用重要信息提取
-    important_info_request_timeout: float = 15.0  # 后台单次尝试超时（秒），失败任务会持久化重试
     important_info_max_attempts: int = 10  # 达到上限后保留为死信，不再无限请求上游
     max_retrieve_summaries: int = 1      # 检索时最多返回的摘要数
     max_retrieve_info: int = 2           # 检索时每种类型最多返回的重要信息数
@@ -183,62 +185,20 @@ class Config(BaseModel):
         "key_event",         # 重要事件
         "emotion_state"      # 情绪状态
     ]
-
-    # 消息聚合配置 - 防止刷屏
-    enable_message_aggregation: bool = True  # 是否启用消息聚合
     aggregation_window: int = 10  # 聚合时间窗口（秒）
     aggregation_max_messages: int = 5  # 单次聚合最多处理的消息数
     aggregation_max_wait_seconds: float = 15.0
-
-    enable_targeted_reply: bool = True  # 允许 planner 选择 QQ 引用回复
-
-    # 群复读配置
-    enable_group_repeat: bool = True  # 是否启用群复读
-
-    # 主动发言配置
-    enable_proactive: bool = True  # 是否启用主动发言
-    idle_meme_enabled: bool = True
     idle_meme_threshold: int = 7200
     idle_meme_cooldown: int = 86400
-    proactive_msg_threshold: int = 50  # 消息数量触发阈值
-    proactive_cooldown: int = 3600  # 发言冷却（秒），发言后 60 分钟内不再主动发言
-
-    # 被动发言配置（是否值得回复的判断）
     enable_reply_judge: bool = True  # 是否启用被动发言判断
-
-    # 动机/情感分析配置
-    enable_sentiment_analysis: bool = True  # 是否启用情感分析
     sentiment_total_timeout: float = 10.0  # 后台共享分析任务上限，不阻塞聊天入口
-
-    # 表情包库：每个 topic 最多保留多少张；<=0 表示不限制
     meme_max_per_topic: int = 100
 
-
-    @field_validator("briefing_time", "news_broadcast_time")
-    @classmethod
-    def _valid_daily_time(cls, value: str) -> str:
-        """Fail fast on a typo instead of silently scheduling at 00:00."""
-        try:
-            hour, minute = (int(part) for part in str(value).strip().split(":"))
-        except (TypeError, ValueError) as exc:
-            raise ValueError("时间必须是 HH:MM 格式") from exc
-        if not (0 <= hour <= 23 and 0 <= minute <= 59):
-            raise ValueError("时间必须在 00:00 到 23:59 之间")
-        return f"{hour:02d}:{minute:02d}"
+config = RuntimeConfig(**get_plugin_config(Config).model_dump(exclude_unset=True))
 
 
-config = get_plugin_config(Config)
-
-
-def agentic_enabled(session_id=None):
-    if not config.agentic_search_enabled:
-        return False
-    if not config.agentic_search_sessions:
-        return True
-    if session_id is None:
-        from .model_types import current_session_id
-        session_id=current_session_id.get()
-    return session_id in config.agentic_search_sessions
+def agentic_enabled():
+    return config.agentic_search_enabled
 
 
 # 日常人设，保留完整短回复版本供独立命令兼容使用。
