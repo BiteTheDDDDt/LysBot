@@ -81,6 +81,9 @@ def get_chat_tools(required_tool: Optional[str] = None):
     run=current_run.get()
     if not run or not run.progress_callback:
         selected = [tool for tool in selected if tool["function"]["name"] != "report_progress"]
+    if run and getattr(getattr(run, "reply_policy", None), "scene", None) == "fact_check":
+        selected = [tool for tool in selected
+                    if tool["function"]["name"] in READ_TOOLS | {"report_progress"}]
     catalog = []
     if run:
         catalog=[{"source_id":key,"url":value["url"]} for key,value in run.sources.items() if value.get("input_url")]
@@ -1310,6 +1313,25 @@ async def read_knowledge(document_id, offset=0, max_chars=4000):
     from .config import config
     result = await asyncio.to_thread(KnowledgeStore(config.knowledge_dir).read, document_id, offset, max_chars)
     return json.dumps(result, ensure_ascii=False, separators=(",", ":"))
+
+
+async def start_fact_check():
+    from .memory import memory_manager
+    from .model_types import current_session_id
+    from .retrieval import failure
+
+    sid = current_session_id.get()
+    if not sid or sid == "_unknown_":
+        return json.dumps(failure("missing_session", invalid=True))
+    recent = await memory_manager.get_recent_session_messages(sid, limit=18)
+    ensure_current_session()
+    candidates = [
+        {"source_id": row.source_id, "role": row.role, "sender_id": row.sender_id,
+         "timestamp": row.timestamp, "text": row.content[:400]}
+        for row in recent if not (row.is_thinking or row.is_summary or row.is_reference) and row.content.strip()
+    ][-12:]
+    return json.dumps({"status": "ok" if candidates else "empty", "recent_messages": candidates},
+                      ensure_ascii=False, separators=(",", ":"))
 
 
 TOOL_FUNCTIONS = bind_handlers(globals())

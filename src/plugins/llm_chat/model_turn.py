@@ -108,7 +108,7 @@ async def execute_model_call(
 async def run_stages(manager, messages, *, model, role, caller, session_id,
                       allow_fallback, required_tool, media_followup):
     from .agent_runner import current_run
-    from .conversation_style import PLANNING_STYLE, RENDERING_STYLE, build_rendering_handoff
+    from .conversation_style import FACT_CHECK_STYLE, PLANNING_STYLE, RENDERING_STYLE, build_rendering_handoff
 
     runner = current_run.get()
     runner.revise_output = True
@@ -127,6 +127,8 @@ async def run_stages(manager, messages, *, model, role, caller, session_id,
     planning_messages = [*messages, Message(role="system", content=(
         PLANNING_STYLE + "\n较长任务可用 report_progress 告知已有发现或实际阻碍，不为进展拖延任务。"
     ))]
+    if runner.reply_policy and runner.reply_policy.scene == "fact_check":
+        planning_messages.append(Message(role="system", content=FACT_CHECK_STYLE))
     if addressing is not None and addressing.candidates:
         planning_messages.append(planning_address_message)
     plan = await manager._chat_impl(

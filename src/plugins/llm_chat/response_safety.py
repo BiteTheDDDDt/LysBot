@@ -6,7 +6,7 @@ import re
 
 INVALID_REPLY = "这次回复异常，请稍后再试。"
 _TOOL_NAMES = frozenset({
-    "generate_image", "send_voice", "search_web", "recall_history", "send_poke", "send_meme",
+    "generate_image", "send_voice", "search_web", "recall_history", "send_poke", "send_meme", "start_fact_check",
 })
 _LEADING_FENCE = re.compile(r"^```(?:json)?\s*", re.IGNORECASE)
 _PARTIAL_CALL = re.compile(

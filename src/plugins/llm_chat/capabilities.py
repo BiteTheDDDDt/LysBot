@@ -370,10 +370,21 @@ GROUP_FACTS_TOOL = {
     },
 }
 
+FACT_CHECK_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "start_fact_check",
+        "description": "调查真相：读取当前会话最近发言作为待核查线索。用于 /dczx，或讨论中确有值得核实、查清后能补充有用信息的具体说法。"
+        "结果仅说明聊天里说过什么。随后按说法选 search_web 查公开事实，或查本会话历史和 QQ 实时事实。",
+        "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
+    },
+}
+
 CAPABILITIES = {
     cap.name: cap
     for cap in (
         Capability(SEARCH_WEB_TOOL, read_only=True),
+        Capability(FACT_CHECK_TOOL, read_only=True, memory_scoped=True),
         Capability(POKE_TOOL),
         Capability(VOICE_TOOL, media=True),
         Capability(IMAGE_GENERATION_TOOL, media=True),

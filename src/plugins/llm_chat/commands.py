@@ -20,6 +20,7 @@ from .memory import memory_manager
 from .config import config, SYSTEM_PROMPT, PERSONA
 from .proactive import proactive_manager
 from . import usage_db
+from .conversation import serialized_turn, session_key
 
 
 memory_card_cmd = on_command("memory", aliases={"记忆回顾", "记忆卡片"}, priority=1, block=True)
@@ -276,6 +277,7 @@ async def handle_help(event: MessageEvent):
     help_text += """
 【命令】
 /help - 显示此帮助
+/dczx [主题] - 调查当前对话里的说法
 /model [模型名] - 切换/查看模型 🔒
 /clear - 清空对话历史 🔒
 /status - 查看当前状态 🔒
@@ -555,6 +557,58 @@ async def handle_jrrp(event: MessageEvent, bot: Bot = None):
         logger.warning(f"[jrrp] 写入记忆失败 user={user_id} group={group_id}: {e}")
     return
 
+
+
+dczx_cmd = on_command("dczx", aliases={"调查真相"}, priority=1, block=True)
+
+
+@dczx_cmd.handle()
+async def handle_dczx(bot: Bot, event: MessageEvent, args: Message = CommandArg()):
+    await _investigate_recent(bot, event, args.extract_plain_text().strip())
+
+
+@serialized_turn(lambda bot, event, topic: session_key(event.user_id, getattr(event, "group_id", None)))
+async def _investigate_recent(bot: Bot, event: MessageEvent, topic: str):
+    from .agent_runner import deliver_reply
+    from .chat import _send_research_progress
+    from .context_builder import build_context_messages
+    from .qq_addressing import QQAddressing
+    from .reply_policy import ReplyPolicy
+    from .tools import clear_poke_context, set_poke_context
+    from .utils import clean_response
+    from . import followups
+
+    user_id = event.user_id
+    group_id = getattr(event, "group_id", None)
+    sid = session_key(user_id, group_id)
+    sender_name = event.sender.card or event.sender.nickname or str(user_id)
+    request = "调查真相" + (f"，想查的是：{topic}" if topic else "")
+    quoted = getattr(getattr(event, "reply", None), "message", None)
+    quote = quoted.extract_plain_text().strip() if quoted is not None else ""
+    policy = ReplyPolicy(scene="fact_check", detailed=True, text_parts=1)
+    messages = await build_context_messages(
+        history=[], session_id=sid, query=request, user_id=user_id, group_id=group_id,
+        user_content=request, user_name=sender_name, reply_policy=policy,
+        recent_context=f"指令引用的消息：{quote[:1000]}" if quote else "",
+    )
+    set_poke_context(group_id, user_id, bot, allow_sender_alias=False)
+    try:
+        response = await model_manager.run_turn(
+            messages, role="chat", caller="commands:dczx", session_id=sid, reply_policy=policy,
+            progress_callback=lambda text: _send_research_progress(bot, event, text, user_id, group_id),
+        )
+    finally:
+        clear_poke_context()
+    text = clean_response(response, preserve_paragraphs=True)
+    if not text:
+        return
+    await deliver_reply(response, text, lambda: dczx_cmd.send(QQAddressing().text(text)),
+                        bot=bot, group_id=group_id)
+    if group_id:
+        proactive_manager.mark_just_spoke(group_id)
+        followups.answered(group_id, [user_id], text, direct=True)
+    await _record_command_interaction(event=event, user_text=request, assistant_text=text,
+                                      sender_name=sender_name, model_spec=getattr(response, "model_spec", None))
 
 
 # ============ /usage 命令 ============
