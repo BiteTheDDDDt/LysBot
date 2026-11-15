@@ -1,6 +1,6 @@
 [project]
 name = "LysBot"
-version = "0.1.0"
+version = "0.2.0"
 description = "LysBot — 磷叶石 QQ 群聊机器人"
 readme = "README.md"
 license = "Apache-2.0"
