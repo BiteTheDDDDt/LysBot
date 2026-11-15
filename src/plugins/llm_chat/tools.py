@@ -1315,6 +1315,26 @@ async def read_knowledge(document_id, offset=0, max_chars=4000):
     return json.dumps(result, ensure_ascii=False, separators=(",", ":"))
 
 
+async def get_daily_luck(user_id: str = ""):
+    from .agent_runner import current_run
+    from .daily_luck import daily_luck_score
+    from .retrieval import failure
+
+    run = current_run.get()
+    if not run:
+        return json.dumps(failure("missing_session", invalid=True))
+    requester = run.requester_id
+    addressing = getattr(run.reply_policy, "addressing", None)
+    known_users = {str(requester): requester} if requester else {}
+    if run.session_id.startswith("group_") and addressing:
+        known_users.update({str(row.user_id): row.user_id for row in addressing.candidates
+                            if row.user_id > 0 and str(row.user_id) != addressing.bot_self_id})
+    target = known_users.get(str(user_id)) if user_id else requester
+    if not target:
+        return json.dumps(failure("unknown_luck_target", invalid=True))
+    return json.dumps({"status": "ok", "user_id": str(target), "score": daily_luck_score(target)})
+
+
 async def start_fact_check():
     from .memory import memory_manager
     from .model_types import current_session_id

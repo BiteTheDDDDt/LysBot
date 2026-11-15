@@ -35,7 +35,7 @@ class WorkingContextTests(unittest.IsolatedAsyncioTestCase):
         with (
             patch.object(agent_runner, '_runtime_path', self.manager._db_path),
             patch.object(commands, 'GroupMessageEvent', GroupEvent),
-            patch.object(commands, '_calculate_2bot_jrrp_value', return_value=49),
+            patch.object(commands, 'daily_luck_score', return_value=49),
             patch.object(commands, '_build_jrrp_memory_context', AsyncMock(return_value='旧记忆：本人说模型凑合用')),
             patch.object(commands, '_record_command_interaction', AsyncMock()) as record,
             patch('src.plugins.llm_chat.model_identity.update_group_card_for_response', AsyncMock()) as card,

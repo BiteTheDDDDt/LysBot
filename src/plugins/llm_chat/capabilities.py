@@ -370,12 +370,22 @@ GROUP_FACTS_TOOL = {
     },
 }
 
+DAILY_LUCK_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "get_daily_luck",
+        "description": "查今日人品分，与 /jrrp 同分。有人问手气，或群里聊到运气正好能接梗时可用。"
+        "默认查本轮说话人；替当前群里点到的人查时填 user_id。按语境加一句短评。",
+        "parameters": {"type": "object", "properties": {"user_id": {"type": "string"}},
+                       "additionalProperties": False},
+    },
+}
+
 FACT_CHECK_TOOL = {
     "type": "function",
     "function": {
         "name": "start_fact_check",
-        "description": "调查真相：读取当前会话最近发言作为待核查线索。用于 /dczx，或讨论中确有值得核实、查清后能补充有用信息的具体说法。"
-        "结果仅说明聊天里说过什么。随后按说法选 search_web 查公开事实，或查本会话历史和 QQ 实时事实。",
+        "description": "回看当前会话最近发言，找出大家具体在聊什么。适合 /dczx，或群聊里听到一句值得顺手查一查的说法。",
         "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
     },
 }
@@ -385,6 +395,7 @@ CAPABILITIES = {
     for cap in (
         Capability(SEARCH_WEB_TOOL, read_only=True),
         Capability(FACT_CHECK_TOOL, read_only=True, memory_scoped=True),
+        Capability(DAILY_LUCK_TOOL, read_only=True),
         Capability(POKE_TOOL),
         Capability(VOICE_TOOL, media=True),
         Capability(IMAGE_GENERATION_TOOL, media=True),

@@ -12,7 +12,6 @@ from nonebot.adapters.onebot.v11 import (
     MessageSegment
 )
 from nonebot.params import CommandArg
-import hashlib
 from datetime import datetime
 
 from .models import model_manager, Message as LLMMessage
@@ -21,6 +20,7 @@ from .config import config, SYSTEM_PROMPT, PERSONA
 from .proactive import proactive_manager
 from . import usage_db
 from .conversation import serialized_turn, session_key
+from .daily_luck import daily_luck_score
 
 
 memory_card_cmd = on_command("memory", aliases={"记忆回顾", "记忆卡片"}, priority=1, block=True)
@@ -131,21 +131,6 @@ def _build_jrrp_recent_context(history, group_id: int = None, sender_name: str =
 
     recent_lines.reverse()
     return "\n".join(recent_lines)
-
-
-def _current_2bot_jrrp_day_index() -> int:
-    return int(datetime.now().timestamp() / 86400 + 0.5)
-
-
-def _calculate_2bot_jrrp_value(user_id: int, day_index: int = None) -> int:
-    """复刻 koishi-plugin-jrrp: sha256(userId + roundedEpochDay + "42") -> JS Number % 101。"""
-    day_index = _current_2bot_jrrp_day_index() if day_index is None else day_index
-    luck = hashlib.sha256()
-    luck.update(str(user_id).encode())
-    luck.update(str(day_index).encode())
-    luck.update(b"42")
-    # JS parseInt(sha256hex, 16) 会转成 IEEE-754 Number；直接用 Python 大整数取模会不一致。
-    return int(float(int(luck.hexdigest(), 16)) % 101)
 
 
 async def _build_jrrp_memory_context(user_id: int, group_id: int = None, sender_name: str = "用户") -> str:
@@ -483,7 +468,7 @@ async def handle_jrrp(event: MessageEvent, bot: Bot = None):
     group_id = event.group_id if isinstance(event, GroupMessageEvent) else None
     sender_name = event.sender.card or event.sender.nickname or str(user_id)
 
-    jrrp_value = _calculate_2bot_jrrp_value(user_id)
+    jrrp_value = daily_luck_score(user_id)
 
     memory_context = await _build_jrrp_memory_context(user_id, group_id, sender_name)
 

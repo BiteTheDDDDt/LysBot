@@ -23,6 +23,25 @@ class JrrpPlanningTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('加薪', surrounding)
         self.assertIn('上次评语', surrounding)
 
+    async def test_luck_tool_shares_command_score_and_uses_current_group_candidates(self):
+        from src.plugins.llm_chat.qq_addressing import MessageTarget, QQAddressing
+        from src.plugins.llm_chat.reply_policy import ReplyPolicy
+
+        run = agent_runner.AgentRunner("group_7", 60)
+        run.requester_id = 101
+        run.reply_policy = ReplyPolicy(addressing=QQAddressing(candidates=(MessageTarget(None, 202, "被点名"),)))
+        token = agent_runner.current_run.set(run)
+        try:
+            self.assertIn("get_daily_luck", {item["function"]["name"] for item in tools.get_chat_tools()})
+            for args, target in [({}, 101), ({"user_id": "202"}, 202)]:
+                result = json.loads(await tools.execute_tool("get_daily_luck", args))
+                self.assertEqual(result, {"status": "ok", "user_id": str(target),
+                                          "score": commands.daily_luck_score(target)})
+            result = json.loads(await tools.execute_tool("get_daily_luck", {"user_id": "999"}))
+            self.assertEqual(result["status"], "invalid_arguments")
+        finally:
+            agent_runner.current_run.reset(token)
+
     async def test_jrrp_planner_can_query_then_render_and_keep_selected_evidence(self):
         manager = models.ModelManager()
         adapter = models.OpenAICompatibleAdapter('openai:test', 'dummy', 'https://example.test/v1', 'test')
@@ -40,7 +59,7 @@ class JrrpPlanningTests(unittest.IsolatedAsyncioTestCase):
         try:
             with patch.object(agent_runner, '_runtime_path', None), \
                  patch.object(commands, '_build_jrrp_memory_context', AsyncMock(return_value='本人近况尚待查找')), \
-                 patch.object(commands, '_calculate_2bot_jrrp_value', return_value=49), \
+                 patch.object(commands, 'daily_luck_score', return_value=49), \
                  patch.object(commands, '_record_command_interaction', AsyncMock()), \
                  patch.object(commands.jrrp_cmd, 'send', AsyncMock(return_value={'message_id': 9})) as send, \
                  patch.object(commands.model_manager, 'run_turn', side_effect=run), \
