@@ -19,6 +19,14 @@ _group_last_cards: dict[tuple, tuple[str, float]] = {}
 _delivery_locks = WeakValueDictionary()
 _group_base_cards: dict[tuple, str] = {}
 _TRAILING_PAREN_RE = re.compile(r"^(.*?)[（(]([^（）()]{2,96})[）)]$")
+_TRUNCATED_PAREN_RE = re.compile(r"^(.*?)[（(]([^（）()]{2,96})$")
+_MODEL_PROVIDER_RE = re.compile(
+    r"^(?:CLIProxyAPI|codexproxy|cliproxyapi|Copilot|Google|Anthropic|OpenRouter|"
+    r"openai|deepseek|nvidia|dashscope|siliconflow|tencentmaas|volc|xiaomimimo)(?:/[^:]+)?:", re.I,
+)
+_MODEL_ID_RE = re.compile(r"^(?:gpt-|gemini-|claude-|grok-|deepseek-)", re.I)
+# A live QQ card was cut at 60 UTF-8 bytes; keep the closing bracket in budget.
+_GROUP_CARD_MAX_BYTES = 60
 _proxy_owners: dict[str, str] = {}
 _proxy_refresh_at = 0.0
 _proxy_refresh_lock = asyncio.Lock()
@@ -107,16 +115,42 @@ async def label_usage_models(stats: dict) -> None:
 def _strip_existing_model_label(name: str) -> str:
     text = (name or "").strip() or PERSONA.name
     while True:
-        m = _TRAILING_PAREN_RE.search(text)
+        m = _TRAILING_PAREN_RE.fullmatch(text)
+        truncated = m is None
+        if truncated:
+            m = _TRUNCATED_PAREN_RE.fullmatch(text)
         if not m:
             return text or PERSONA.name
         label = m.group(2)
-        if not re.match(r"^(?:CLIProxyAPI|codexproxy|cliproxyapi|Google|Anthropic|OpenRouter|openai|deepseek|nvidia|dashscope|siliconflow|tencentmaas|volc|xiaomimimo)(?:/[^:]+)?:|^(?:gpt-|gemini-|claude-|grok-|deepseek-)", label, re.I):
+        provider = _MODEL_PROVIDER_RE.match(label)
+        if not (provider or _MODEL_ID_RE.match(label)):
+            return text
+        model = label[provider.end():] if provider else label
+        if truncated and not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9._:/+@-]*", model):
             return text
         text = (m.group(1) or "").strip()
         if not text:
             return PERSONA.name
     return text
+
+
+def _group_card_label(spec: str) -> str:
+    provider, _, model_id = spec.strip().partition(":")
+    if provider in {"cliproxyapi", "codexproxy", "openai"} and model_id.startswith("copilot/"):
+        return f"Copilot:{format_model_label(model_id)}"
+    return format_model_spec_label(spec)
+
+
+def _fit_group_card(base: str, label: str) -> str | None:
+    budget = _GROUP_CARD_MAX_BYTES - len(f"{base}（）".encode("utf-8"))
+    if len(label.encode("utf-8")) > budget:
+        # Preserve the user's base name; omit the provider before giving up.
+        label = label.rpartition(":")[2]
+        if not _MODEL_ID_RE.match(label):
+            return None
+    if len(label.encode("utf-8")) > budget:
+        return None
+    return f"{base}（{label}）"
 
 
 def delivery_lock(bot, group_id):
@@ -142,19 +176,30 @@ async def update_group_card_for_response(bot: Any, group_id: int | None, respons
     try:
         async with asyncio.timeout(5):
             await refresh_proxy_model_identity()
-            label = format_model_spec_label(spec)
+            label = _group_card_label(spec)
             if not label:
                 return
             cached = _group_last_cards.get(key)
             if cached and cached[0] == label and time.monotonic() - cached[1] < 60:
                 return
             self_id = int(bot.self_id)
-            info = await bot.get_group_member_info(group_id=int(group_id), user_id=self_id, no_cache=True)
+            member = {"group_id": int(group_id), "user_id": self_id}
+            info = await bot.get_group_member_info(**member, no_cache=True)
             current = str(info.get("card") or info.get("nickname") or PERSONA.name)
             base = _strip_existing_model_label(current)
-            target = f"{base}（{label}）"
+            target = _fit_group_card(base, label)
+            if target is None:
+                log.warning(f"[model_identity] 群 {group_id} 名片空间不足，保留原昵称")
+                return
             if current != target:
-                await bot.set_group_card(group_id=int(group_id), user_id=self_id, card=target)
+                await bot.set_group_card(**member, card=target)
+                confirmed = await bot.get_group_member_info(**member, no_cache=True)
+                if confirmed.get("card") != target:
+                    await asyncio.sleep(0.2)
+                    confirmed = await bot.get_group_member_info(**member, no_cache=True)
+                if confirmed.get("card") != target:
+                    log.warning(f"[model_identity] 群 {group_id} 名片写入后读回不一致，暂不缓存")
+                    return
                 log.info(f"[model_identity] 群 {group_id} 名片已更新为 {target}")
             _group_base_cards[key] = base
             _group_last_cards[key] = (label, time.monotonic())

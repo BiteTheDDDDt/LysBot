@@ -25,7 +25,7 @@ class ModelIdentityTests(unittest.IsolatedAsyncioTestCase):
         bot = SimpleNamespace(
             self_id="42",
             get_group_member_info=AsyncMock(
-                return_value={"card": "磷叶石（Google:gemini-old）", "nickname": "磷叶石"}
+                side_effect=[{"card": "磷叶石（Google:gemini-old）"}, {"card": "磷叶石（CLIProxyAPI:gpt-5.6-luna）"}]
             ),
             set_group_card=AsyncMock(),
         )
@@ -42,6 +42,38 @@ class ModelIdentityTests(unittest.IsolatedAsyncioTestCase):
     def test_preserves_non_model_parentheses(self):
         self.assertEqual(model_identity._strip_existing_model_label('磷叶石（休息中）'), '磷叶石（休息中）')
         self.assertEqual(model_identity._strip_existing_model_label('磷叶石（休息中）（Google:gemini-old）'), '磷叶石（休息中）')
+        self.assertEqual(model_identity._strip_existing_model_label('磷叶石（休息中'), '磷叶石（休息中')
+
+    async def test_truncated_opus_is_replaced_with_short_copilot_label(self):
+        old = '磷叶石（CLIProxyAPI/Antigravity:claude-opus-4-6-thinking'
+        target = '磷叶石（Copilot:gpt-4o）'
+        for current in (old, old + '（CLIProxyAPI/azure openai:gpt-4o）'):
+            bot = SimpleNamespace(self_id='42', get_group_member_info=AsyncMock(side_effect=[{'card': current}, {'card': target}]), set_group_card=AsyncMock())
+            with patch.object(model_identity, 'refresh_proxy_model_identity', AsyncMock()):
+                await model_identity.update_group_card_for_response(bot, 7, SimpleNamespace(model_spec='cliproxyapi:copilot/gpt-4o'))
+            bot.set_group_card.assert_awaited_once_with(group_id=7, user_id=42, card=target)
+            self.assertEqual(bot.get_group_member_info.await_count, 2)
+            self.assertIn(('42', 7), model_identity._group_last_cards)
+            model_identity._group_last_cards.clear()
+
+    def test_group_card_fits_utf8_budget_without_editing_base_name(self):
+        base = '长' * 12
+        card = model_identity._fit_group_card(base, 'CLIProxyAPI/Antigravity:gpt-4o')
+        self.assertEqual(card, base + '（gpt-4o）')
+        self.assertLessEqual(len(card.encode('utf-8')), 60)
+        self.assertIsNone(model_identity._fit_group_card('长' * 19, 'Copilot:gpt-4o'))
+
+    async def test_readback_mismatch_is_not_cached_and_next_reply_retries(self):
+        old = {'card': '磷叶石（CLIProxyAPI/Antigravity:claude-opus-4-6-thinking'}
+        target = {'card': '磷叶石（Copilot:gpt-4o）'}
+        bot = SimpleNamespace(self_id='42', get_group_member_info=AsyncMock(side_effect=[old, old, old, old, target]), set_group_card=AsyncMock())
+        response = SimpleNamespace(model_spec='cliproxyapi:copilot/gpt-4o')
+        with patch.object(model_identity, 'refresh_proxy_model_identity', AsyncMock()):
+            await model_identity.update_group_card_for_response(bot, 7, response)
+            self.assertNotIn(('42', 7), model_identity._group_last_cards)
+            await model_identity.update_group_card_for_response(bot, 7, response)
+        self.assertEqual(bot.set_group_card.await_count, 2)
+        self.assertIn(('42', 7), model_identity._group_last_cards)
 
     async def test_briefing_platform_labels_survive_empty_renderer_cache(self):
         from src.plugins.llm_chat.card_templates import usage_models
@@ -91,7 +123,9 @@ class ModelIdentityTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_refresh_preserves_external_rename_and_separates_bot_accounts(self):
         response = SimpleNamespace(model_spec='google:gemini-test')
-        bot = SimpleNamespace(self_id='42', get_group_member_info=AsyncMock(return_value={'card': '新名字（休息中）'}), set_group_card=AsyncMock())
+        old = {'card': '新名字（休息中）'}
+        new = {'card': '新名字（休息中）（Google:gemini-test）'}
+        bot = SimpleNamespace(self_id='42', get_group_member_info=AsyncMock(side_effect=[old, new, old, new]), set_group_card=AsyncMock())
         model_identity._group_last_cards[('42', 7)] = ('Google:gemini-test', -100)
         with patch.object(model_identity, 'refresh_proxy_model_identity', AsyncMock()):
             await model_identity.update_group_card_for_response(bot, 7, response)
