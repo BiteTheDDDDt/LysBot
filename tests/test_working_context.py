@@ -48,7 +48,7 @@ class WorkingContextTests(unittest.IsolatedAsyncioTestCase):
             self.assertIs(card.await_args.args[0], bot)
             self.assertEqual(record.await_args.kwargs['model_spec'], 'test:actual-fallback')
         try:
-            self.assertTrue(followups.eligible(7, 101))
+            self.assertTrue(followups.active(7) is not None)
             next_run = self.runner()
             await restore_context(next_run)
             note = json.loads(next_run.transcript[-1]['content'].split('\n', 1)[1])[0]

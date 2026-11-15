@@ -558,9 +558,8 @@ class ProactiveManager:
 
                         # 标记刚发言并设置 30 分钟冷却
                         from . import followups
-                        if user_id:
-                            followups.answered(group_id, [user_id, *addressing.audience, *addressing.mentions], sent_turn.text_for_memory, direct=True,
-                                               closed=planner_decision.action == "close")
+                        followups.answered(group_id, sent_turn.text_for_memory, direct=True,
+                                           closed=planner_decision.action == "close")
                         self.mark_just_spoke(group_id)
                         self.set_cooldown(group_id)
 

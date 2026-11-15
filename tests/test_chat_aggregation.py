@@ -58,6 +58,31 @@ class AggregatedChatTests(unittest.IsolatedAsyncioTestCase):
             await asyncio.wait_for(chat.delayed_process(object(),918), timeout=0.5)
         handle.assert_awaited_once()
 
+    async def test_implicit_messages_share_one_short_batch_even_with_direct_aggregation_off(self):
+        bot = object()
+        handle = AsyncMock()
+        sender = SimpleNamespace(card="甲", nickname="甲")
+        events = [SimpleNamespace(group_id=917, user_id=uid, sender=sender, to_me=False,
+                                  get_plaintext=lambda text=text: text)
+                  for uid, text in [(42, "是接上句"), (84, "再补一句")]]
+
+        async def prepare(bot, event):
+            return SimpleNamespace(message=event.get_plaintext(), images_base64=[], faces=[])
+
+        with (
+            patch.object(chat.config, "enable_message_aggregation", False),
+            patch.object(chat.config, "aggregation_window", 60),
+            patch.object(chat, "FOLLOWUP_BATCH_SECONDS", 0.05),
+            patch.object(chat, "prepare_incoming_message", side_effect=prepare),
+            patch.object(chat, "handle_merged_chat", handle),
+        ):
+            for event in events:
+                await chat._handle_chat(bot, event)
+            handle.assert_not_awaited()
+            await asyncio.wait_for(chat.aggregation_buffers[917].task, timeout=1)
+        handle.assert_awaited_once()
+        self.assertEqual([item.user_id for item in handle.await_args.args[2]], [42, 84])
+
     @staticmethod
     def _pending_message(user_id: int, sender_name: str, message: str):
         return chat.PendingMessage(

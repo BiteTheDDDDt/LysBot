@@ -76,7 +76,6 @@ class AddressingTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_renderer_receives_final_audience_and_delivery_uses_same_object(self):
         from src.plugins.llm_chat.model_turn import run_stages
-        from src.plugins.llm_chat import followups
         address = self.address({"audience_user_ids": [101]})
         initial_hint = address.system_hint()
         runner = agent_runner.AgentRunner("group_7", 60)
@@ -102,9 +101,5 @@ class AddressingTests(unittest.IsolatedAsyncioTestCase):
                 [models.Message("system", initial_hint)], model=None, role="chat", caller="test",
                 session_id="group_7", allow_fallback=False, required_tool=None, media_followup=True)
             self.assertEqual(address.text(str(result))[0].data["qq"], "202")
-            followups.answered(7001, [101, *address.audience, *address.mentions], str(result), direct=True)
-            self.assertTrue(followups.eligible(7001, 202))
-            self.assertFalse(followups.eligible(7001, 303))
         finally:
-            followups.windows.pop(7001, None)
             agent_runner.current_run.reset(token)

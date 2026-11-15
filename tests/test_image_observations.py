@@ -45,7 +45,7 @@ class ImageObservationTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("芯片题", hidden)
 
     async def test_image_only_does_not_use_followup_window_but_explicit_at_still_works(self):
-        followups.answered(7, [42], '刚才的回复', direct=True)
+        followups.answered(7, '刚才的回复', direct=True)
         event = SimpleNamespace(group_id=7, user_id=42, self_id=999, to_me=False, message=QQMessage(), get_plaintext=lambda: '')
         with patch.object(chat, 'GroupMessageEvent', SimpleNamespace):
             self.assertFalse(await chat.should_respond(event))

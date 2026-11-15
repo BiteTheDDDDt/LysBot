@@ -22,66 +22,63 @@ class FollowupTests(unittest.IsolatedAsyncioTestCase):
                                      message=Message("那为什么呢"), get_plaintext=lambda: "那为什么呢")
 
     def open(self):
-        followups.answered(7, [42], "因为输入格式不同。", direct=True)
+        followups.answered(7, "因为输入格式不同。", direct=True)
 
     def test_three_replies_do_not_extend_deadline(self):
         self.open()
         deadline = followups.windows[7].expires
         quiet_deadline = followups.windows[7].quiet_expires
         for i in range(3):
-            self.assertTrue(followups.eligible(7, 42))
-            followups.answered(7, [42], "补充说明", direct=False)
+            self.assertIsNotNone(followups.active(7))
+            followups.answered(7, "补充说明", direct=False)
             self.assertEqual(followups.windows[7].expires, deadline)
             self.assertEqual(followups.windows[7].quiet_expires, quiet_deadline)
             if i < 2:
                 self.assertEqual(followups.windows[7].remaining, 2 - i)
-        self.assertFalse(followups.eligible(7, 42))
+        self.assertIsNone(followups.active(7))
 
     def test_expiry_and_group_isolation(self):
         with patch.object(followups.time, "monotonic", return_value=100):
             self.open()
-            self.assertFalse(followups.eligible(8, 42))
+            self.assertIsNone(followups.active(8))
         with patch.object(followups.time, "monotonic", return_value=221):
-            self.assertTrue(followups.eligible(7, 42))
+            self.assertIsNotNone(followups.active(7))
         with patch.object(followups.time, "monotonic", return_value=701):
-            self.assertFalse(followups.eligible(7, 42))
+            self.assertIsNone(followups.active(7))
 
     def test_interruption_removes_quiet_grace_without_extending_normal_window(self):
         with patch.object(followups.time, "monotonic", return_value=100):
             self.open()
         with patch.object(followups.time, "monotonic", return_value=150):
-            followups.observe(7, 43)
-            self.assertTrue(followups.eligible(7, 42))
+            followups.skip(7)
+            self.assertIsNotNone(followups.active(7))
         with patch.object(followups.time, "monotonic", return_value=221):
-            self.assertFalse(followups.eligible(7, 42))
+            self.assertIsNone(followups.active(7))
         with patch.object(followups.time, "monotonic", return_value=300):
             self.open()
         with patch.object(followups.time, "monotonic", return_value=523):
-            followups.observe(7, 43)
-            self.assertFalse(followups.eligible(7, 43))
-            self.assertFalse(followups.eligible(7, 42))
+            followups.skip(7)
+            self.assertIsNone(followups.active(7))
+            self.assertIsNone(followups.active(7))
 
     def test_zero_window_still_disables_implicit_followups(self):
         with patch.object(followups.config, "followup_window_seconds", 0):
             self.open()
-        self.assertFalse(followups.eligible(7, 42))
+        self.assertIsNone(followups.active(7))
 
-    def test_other_members_do_not_inherit_window_and_busy_group_closes_it(self):
+    def test_unrelated_turns_do_not_close_window_immediately(self):
         self.open()
-        followups.observe(7, 43)
-        self.assertFalse(followups.eligible(7, 43))
-        followups.observe(7, 44)
-        self.assertFalse(followups.eligible(7, 44))
-        followups.observe(7, 45)
-        self.assertFalse(followups.eligible(7, 42))
+        followups.skip(7)
+        self.assertIsNotNone(followups.active(7))
+        followups.skip(7)
+        self.assertIsNotNone(followups.active(7))
+        followups.skip(7)
+        self.assertIsNone(followups.active(7))
 
     def test_explicit_other_target_and_close_stop_continuation(self):
         self.open()
-        self.assertFalse(followups.eligible(7, 42, directed_elsewhere=True))
-        followups.observe(7, 42, directed_elsewhere=True)
-        self.assertIsNone(followups.active(7))
-        self.open()
-        followups.answered(7, [42], "那先这样", direct=False, closed=True)
+        self.assertFalse(chat._eligible_event_followup(self.event, directed_elsewhere=True))
+        followups.answered(7, "那先这样", direct=False, closed=True)
         self.assertIsNone(followups.active(7))
 
     async def test_unmentioned_followup_enters_passive_path(self):
@@ -97,9 +94,9 @@ class FollowupTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(message=message):
                 followups.windows.clear()
                 with patch.object(followups.time, 'monotonic', return_value=100):
-                    followups.answered(7, [42], '哦vllm sglang这个我有点感兴趣，怎么参与？', direct=True)
+                    followups.answered(7, '哦vllm sglang这个我有点感兴趣，怎么参与？', direct=True)
                 window = followups.windows[7]
-                event = SimpleNamespace(group_id=7, user_id=42, self_id=999, to_me=False, message=Message(message), get_plaintext=lambda: message, sender=SimpleNamespace(card='甲', nickname='甲'))
+                event = SimpleNamespace(group_id=7, user_id=55, self_id=999, to_me=False, message=Message(message), get_plaintext=lambda: message, sender=SimpleNamespace(card='甲', nickname='甲'))
                 resolved = SimpleNamespace(plain_text=message, compose=lambda: message, image_urls=[], direct_image_urls=[], faces=[])
                 bot = SimpleNamespace(send=AsyncMock())
 
@@ -129,7 +126,8 @@ class FollowupTests(unittest.IsolatedAsyncioTestCase):
                     else:
                         bot.send.assert_not_awaited()
                         generate.assert_not_awaited()
-                        self.assertIsNone(followups.active(7))
+                        self.assertEqual(window.interruptions, 1)
+                        self.assertEqual(window.remaining, 3)
 
     async def test_implicit_single_can_stay_silent_even_when_reply_judge_disabled(self):
         self.open()
@@ -141,11 +139,11 @@ class FollowupTests(unittest.IsolatedAsyncioTestCase):
             await chat.handle_single_chat(object(), self.event, "那为什么呢", [], [])
         self.assertFalse(plan.await_args.kwargs["is_direct"])
         self.assertEqual(plan.await_args.kwargs["default_action"], "silent")
-        self.assertIsNone(followups.active(7))
+        self.assertEqual(followups.active(7).interruptions, 1)
 
     async def test_implicit_batch_can_stay_silent_without_generating(self):
         self.open()
-        pending = SimpleNamespace(event=self.event, message="那为什么呢", sender_name="甲", user_id=42,
+        pending = chat.PendingMessage(event=self.event, message="那为什么呢", sender_name="甲", user_id=42,
                                   images_base64=[], faces=[])
         with (
             patch.object(chat.config, "enable_reply_judge", False),
@@ -177,7 +175,7 @@ class FollowupTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(result.action, expected)
 
     async def test_closed_window_drops_queued_implicit_messages(self):
-        pending = SimpleNamespace(event=self.event, message="那为什么呢", sender_name="甲", user_id=42,
+        pending = chat.PendingMessage(event=self.event, message="那为什么呢", sender_name="甲", user_id=42,
                                   images_base64=[], faces=[])
         with (
             patch.object(chat, "GroupMessageEvent", SimpleNamespace),
@@ -192,7 +190,7 @@ class FollowupTests(unittest.IsolatedAsyncioTestCase):
         resolved = SimpleNamespace(plain_text='xp是自由的', compose=lambda: 'xp是自由的', image_urls=[], direct_image_urls=[], faces=[])
 
         async def proactive_reply(*args, **kwargs):
-            followups.answered(7, [42], 'XP自由，钱包可不自由。', direct=True)
+            followups.answered(7, 'XP自由，钱包可不自由。', direct=True)
             return True
 
         def stored_message(_user_id, role, content, *args, **kwargs):
@@ -201,9 +199,9 @@ class FollowupTests(unittest.IsolatedAsyncioTestCase):
             await chat.record_group_message(object(), self.event)
             self.assertIn('xp是自由的', enriched.await_args.args[2])
             proactive.assert_awaited_once()
-            self.assertTrue(followups.eligible(7, 42))
+            self.assertIsNotNone(followups.active(7))
             self.assertFalse(await chat.should_respond(self.event))
-            pending = SimpleNamespace(event=self.event, message='xp是自由的', sender_name='甲', user_id=42, images_base64=[], faces=[])
+            pending = chat.PendingMessage(event=self.event, message='xp是自由的', sender_name='甲', user_id=42, images_base64=[], faces=[])
             await chat.handle_single_chat(object(), self.event, 'xp是自由的', [], [])
             await chat.handle_merged_chat(object(), 7, [pending])
             plan.assert_not_awaited()
@@ -217,5 +215,5 @@ class FollowupTests(unittest.IsolatedAsyncioTestCase):
         self.open()
         self.event._llm_followup_window = followups.active(7)
         self.assertTrue(chat._eligible_event_followup(self.event))
-        followups.answered(7, [42], "另一次对话的回答", direct=True)
+        followups.answered(7, "另一次对话的回答", direct=True)
         self.assertFalse(chat._eligible_event_followup(self.event))

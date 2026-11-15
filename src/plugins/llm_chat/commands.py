@@ -529,7 +529,7 @@ async def handle_jrrp(event: MessageEvent, bot: Bot = None):
         return
 
     if group_id:
-        followups.answered(group_id, [user_id], final_text, direct=True)
+        followups.answered(group_id, final_text, direct=True)
     try:
         await _record_command_interaction(
             event=event,
@@ -591,7 +591,7 @@ async def _investigate_recent(bot: Bot, event: MessageEvent, topic: str):
                         bot=bot, group_id=group_id)
     if group_id:
         proactive_manager.mark_just_spoke(group_id)
-        followups.answered(group_id, [user_id], text, direct=True)
+        followups.answered(group_id, text, direct=True)
     await _record_command_interaction(event=event, user_text=request, assistant_text=text,
                                       sender_name=sender_name, model_spec=getattr(response, "model_spec", None))
 

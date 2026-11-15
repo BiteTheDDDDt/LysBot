@@ -63,6 +63,11 @@ class PendingMessage:
     faces: list = field(default_factory=list)
     planner_decision: Optional[PlannerDecision] = None
 
+    @property
+    def directed_to_bot(self) -> bool:
+        text = getattr(self.event, "get_plaintext", lambda: self.message)()
+        return _group_message_direction(self.event, text)[0]
+
 
 @dataclass
 class AggregationBuffer:
@@ -85,6 +90,7 @@ group_message_order_by_id: dict[int, OrderedDict[str, int]] = {}
 GROUP_MESSAGE_ORDER_CACHE_SIZE = 500
 # How much recent group chatter the passive planner reads when re-checking.
 REPLY_JUDGE_WINDOW_SECONDS = 120
+FOLLOWUP_BATCH_SECONDS = 3.0
 
 
 def _cancel_planner_wait(group_id: int) -> None:
@@ -487,6 +493,10 @@ async def delayed_process(bot: Bot, group_id: int):
             while True:
                 quiet_deadline = buffer.last_received_at + max(0, float(config.aggregation_window))
                 hard_deadline = buffer.first_received_at + max(0.1, float(config.aggregation_max_wait_seconds))
+                if not any(item.directed_to_bot for item in buffer.messages):
+                    # A short fixed scan batches fragments without extending on each message.
+                    followup_deadline = buffer.first_received_at + FOLLOWUP_BATCH_SECONDS
+                    hard_deadline = min(hard_deadline, followup_deadline)
                 delay = min(quiet_deadline, hard_deadline) - loop.time()
                 if delay <= 0:
                     break
@@ -719,12 +729,13 @@ async def _record_group_message(bot: Bot, event: GroupMessageEvent):
     message = resolved.compose()
     is_to_bot, directed_at_other = _group_message_direction(event, plain_message)
     from . import followups
-    followups.observe(group_id, user_id, directed_at_other and not is_to_bot)
+    if directed_at_other and not is_to_bot and _eligible_event_followup(event):
+        followups.skip(group_id)
     image_urls = resolved.image_urls
 
     # Non-directed pictures enrich their original row in the background. Direct
     # questions still wait for observations before planner/chat consume them.
-    if image_urls and not is_to_bot and not followups.eligible(group_id, user_id, directed_at_other):
+    if image_urls and not is_to_bot and not (plain_message.strip() and _eligible_event_followup(event, directed_at_other)):
         if len(_incoming_image_tasks) >= max(1, config.incoming_image_max_pending):
             content = f"【群员-{sender_name}】 {message} [图片暂未识别：后台繁忙]".strip()
             if stored_message is not None:
@@ -888,7 +899,7 @@ async def _enrich_group_record(bot, event, resolved, stored_message, sender_name
             f"[主动发言] 跳过：消息明确指向 Bot，将由被动回复处理 group_id={group_id}"
         )
         return
-    if followups.eligible(group_id, user_id, directed_at_other):
+    if plain_message.strip() and _eligible_event_followup(event, directed_at_other):
         return  # The passive planner will decide whether this is actually a followup.
     repeat_candidate = ""
     if not (directed_at_other or image_urls or faces) and repeat_manager.is_candidate(group_id, plain_message):
@@ -922,9 +933,8 @@ async def should_respond(event: MessageEvent) -> bool:
 def _eligible_event_followup(event, directed_elsewhere=False):
     from . import followups
     window = followups.active(event.group_id)
-    return (window is not None
-            and getattr(event, "_llm_followup_window", window) is window
-            and followups.eligible(event.group_id, event.user_id, directed_elsewhere))
+    return (not directed_elsewhere and window is not None
+            and getattr(event, "_llm_followup_window", window) is window)
 
 
 # 消息响应器
@@ -1006,9 +1016,11 @@ async def _handle_chat(bot: Bot, event: MessageEvent):
 
     # 群聊消息
     group_id = event.group_id
-    # 新的定向消息优先于尚未执行的旧 wait；主动发言 wait 也不再抢这轮对话。
-    _cancel_planner_wait(group_id)
-    proactive_manager.cancel_wait(group_id)
+    direct = _group_message_direction(event, event.get_plaintext())[0]
+    # Only a new request to the bot supersedes existing wait plans.
+    if direct:
+        _cancel_planner_wait(group_id)
+        proactive_manager.cancel_wait(group_id)
 
     prepared = await prepare_incoming_message(bot, event)
 
@@ -1026,7 +1038,7 @@ async def _handle_chat(bot: Bot, event: MessageEvent):
         elif faces:
             message = " "
 
-    if config.enable_message_aggregation:
+    if config.enable_message_aggregation or not direct:
         await add_to_aggregation_buffer(bot, event, message, images_base64, faces)
     else:
         await handle_single_chat(bot, event, message, images_base64, faces)
@@ -1105,7 +1117,7 @@ async def handle_single_chat(bot: Bot, event: MessageEvent, message: str,
                 return
             if not planner_decision.should_continue:
                 if not direct:
-                    followups.windows.pop(group_id, None)
+                    followups.skip(group_id)
                 return
         elif not planner_decision.should_continue:
             planner_decision.action = "reply"
@@ -1258,7 +1270,6 @@ async def _do_handle_single_chat(bot: Bot, event: MessageEvent, message: str,
     )
 
     # 调用模型
-    addressing = reply_policy.addressing or QQAddressing()
     sent_turn = None
     try:
         if planned_meme and is_meme_only(planner_decision):
@@ -1313,7 +1324,7 @@ async def _do_handle_single_chat(bot: Bot, event: MessageEvent, message: str,
         if group_id:
             proactive_manager.mark_just_spoke(group_id)
             from . import followups
-            followups.answered(group_id, [user_id, *addressing.audience, *addressing.mentions], sent_turn.text_for_memory,
+            followups.answered(group_id, sent_turn.text_for_memory,
                                direct=_group_message_direction(event, event.get_plaintext())[0],
                                closed=bool(planner_decision and planner_decision.action == "close"))
 
@@ -1350,16 +1361,19 @@ async def handle_merged_chat(bot: Bot, group_id: int, pending_messages: list[Pen
     if not pending_messages:
         return
 
-    combined = "\n".join(f"【群员-{format_sender_name(pm.sender_name)} QQ:{pm.user_id}】 {pm.message}" for pm in pending_messages)
     from . import followups
-    direct = any(_group_message_direction(pm.event, getattr(pm.event, "get_plaintext", lambda: pm.message)())[0]
-                 for pm in pending_messages)
-    if not direct:
+    directed = [pm for pm in pending_messages if pm.directed_to_bot]
+    direct = bool(directed)
+    if direct:
+        # Other nearby lines remain in group history. Only explicit requests
+        # in this batch should be treated as instructions to the bot.
+        pending_messages = directed
+    else:
         pending_messages = [pm for pm in pending_messages if _eligible_event_followup(
             pm.event, _group_message_direction(pm.event, getattr(pm.event, "get_plaintext", lambda: pm.message)())[1])]
         if not pending_messages:
             return
-        combined = "\n".join(f"【群员-{format_sender_name(pm.sender_name)} QQ:{pm.user_id}】 {pm.message}" for pm in pending_messages)
+    combined = "\n".join(f"【群员-{format_sender_name(pm.sender_name)} QQ:{pm.user_id}】 {pm.message}" for pm in pending_messages)
     decision = await plan_chat_action(
         session_id=f"group_{group_id}", group_id=group_id, current_message=combined,
         mode="passive", is_direct=direct,
@@ -1389,7 +1403,7 @@ async def handle_merged_chat(bot: Bot, group_id: int, pending_messages: list[Pen
         return
     if (config.enable_reply_judge or not direct) and not decision.should_continue:
         if not direct:
-            followups.windows.pop(group_id, None)
+            followups.skip(group_id)
         return
     if not decision.should_continue:
         decision.action = "reply"
@@ -1538,7 +1552,6 @@ async def _do_handle_merged_chat(
     )
 
     # 调用模型
-    addressing = reply_policy.addressing or QQAddressing()
     sent_turn = None
     try:
         # 注：群聊图片描述已由 record_group_message 在每条消息保存时调用 describe_image
@@ -1600,9 +1613,8 @@ async def _do_handle_merged_chat(
 
         # 保存助手回复
         from . import followups
-        followups.answered(group_id, [*[pm.user_id for pm in pending_messages], *addressing.audience, *addressing.mentions], sent_turn.text_for_memory,
-                           direct=any(_group_message_direction(pm.event, getattr(pm.event, "get_plaintext", lambda: pm.message)())[0]
-                                      for pm in pending_messages),
+        followups.answered(group_id, sent_turn.text_for_memory,
+                           direct=any(pm.directed_to_bot for pm in pending_messages),
                            closed=bool(planner_decision and planner_decision.action == "close"))
         history_text = _build_assistant_history_text(sent_turn.text_for_memory, sent_turn.sent_meme)
         await memory_manager.add_message(0, "assistant", history_text, group_id,
