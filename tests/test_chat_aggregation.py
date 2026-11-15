@@ -58,7 +58,7 @@ class AggregatedChatTests(unittest.IsolatedAsyncioTestCase):
             await asyncio.wait_for(chat.delayed_process(object(),918), timeout=0.5)
         handle.assert_awaited_once()
 
-    async def test_implicit_messages_share_one_short_batch_even_with_direct_aggregation_off(self):
+    async def test_implicit_messages_use_the_group_aggregation_window(self):
         bot = object()
         handle = AsyncMock()
         sender = SimpleNamespace(card="甲", nickname="甲")
@@ -70,9 +70,7 @@ class AggregatedChatTests(unittest.IsolatedAsyncioTestCase):
             return SimpleNamespace(message=event.get_plaintext(), images_base64=[], faces=[])
 
         with (
-            patch.object(chat.config, "enable_message_aggregation", False),
-            patch.object(chat.config, "aggregation_window", 60),
-            patch.object(chat, "FOLLOWUP_BATCH_SECONDS", 0.05),
+            patch.object(chat.config, "aggregation_window", 0.05),
             patch.object(chat, "prepare_incoming_message", side_effect=prepare),
             patch.object(chat, "handle_merged_chat", handle),
         ):

@@ -36,7 +36,7 @@ async def exercise(root, directory, model_port, requests):
         OPENAI_BASE_URL=f"http://127.0.0.1:{model_port}/v1", PYTHONUTF8="1",
         LLM_CHAT_DATA_DIR=str(directory / "data"),
         LLM_CHAT_DATABASE_PATH=str(directory / "data/history.db"),
-        ENABLE_MESSAGE_AGGREGATION="false",
+        AGGREGATION_WINDOW="0",
         ENABLE_IMPORTANT_INFO="false",
         ENABLE_DAILY_BRIEFING="false", ENABLE_DAILY_NEWS_BROADCAST="false",
         ENABLE_MODEL_CARD="false", NETWORK_MAX_RETRIES="0",

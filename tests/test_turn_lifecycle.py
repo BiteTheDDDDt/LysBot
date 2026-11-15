@@ -66,7 +66,6 @@ class TurnLifecycleTests(unittest.IsolatedAsyncioTestCase):
         with (
             chat_dependencies(),
             patch.object(chat, "GroupMessageEvent", SimpleNamespace),
-            patch.object(chat.config, "enable_message_aggregation", True),
             patch.object(chat.config, "aggregation_window", 0),
             patch.object(chat, "resolve_incoming_message", side_effect=resolve),
             patch.object(chat, "download_images_as_base64", AsyncMock(return_value=[])),

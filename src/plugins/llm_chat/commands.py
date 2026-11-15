@@ -332,7 +332,7 @@ async def handle_status(event: MessageEvent):
 
 ━━ 群聊状态 ━━
 • 主动发言: {proactive_status} ({cooldown_status})
-• 消息聚合: {"开启" if config.enable_message_aggregation else "关闭"} ({config.aggregation_window}s 窗口)
+• 消息聚合: 安静 {config.aggregation_window}s 或首条入队后 {config.aggregation_max_wait_seconds:g}s 处理
 • 每日简报: {"开启" if config.enable_daily_briefing else "关闭"} ({config.briefing_time})
 • 新闻播报: {"开启" if config.enable_daily_news_broadcast else "关闭"} ({config.news_broadcast_time})"""
 

@@ -81,7 +81,6 @@ class Config(BaseModel):
     news_max_items: int = 5  # 单群单次最多播报条数
     enable_important_info: bool = True  # 是否启用重要信息提取
     important_info_request_timeout: float = 15.0  # 后台单次尝试超时（秒），失败任务会持久化重试
-    enable_message_aggregation: bool = True  # 是否启用消息聚合
     enable_targeted_reply: bool = True  # 允许 planner 选择 QQ 引用回复
     enable_group_repeat: bool = True  # 是否启用群复读
     enable_proactive: bool = True  # 是否启用主动发言

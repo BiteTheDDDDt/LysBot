@@ -90,7 +90,6 @@ group_message_order_by_id: dict[int, OrderedDict[str, int]] = {}
 GROUP_MESSAGE_ORDER_CACHE_SIZE = 500
 # How much recent group chatter the passive planner reads when re-checking.
 REPLY_JUDGE_WINDOW_SECONDS = 120
-FOLLOWUP_BATCH_SECONDS = 3.0
 
 
 def _cancel_planner_wait(group_id: int) -> None:
@@ -493,10 +492,6 @@ async def delayed_process(bot: Bot, group_id: int):
             while True:
                 quiet_deadline = buffer.last_received_at + max(0, float(config.aggregation_window))
                 hard_deadline = buffer.first_received_at + max(0.1, float(config.aggregation_max_wait_seconds))
-                if not any(item.directed_to_bot for item in buffer.messages):
-                    # A short fixed scan batches fragments without extending on each message.
-                    followup_deadline = buffer.first_received_at + FOLLOWUP_BATCH_SECONDS
-                    hard_deadline = min(hard_deadline, followup_deadline)
                 delay = min(quiet_deadline, hard_deadline) - loop.time()
                 if delay <= 0:
                     break
@@ -1038,10 +1033,7 @@ async def _handle_chat(bot: Bot, event: MessageEvent):
         elif faces:
             message = " "
 
-    if config.enable_message_aggregation or not direct:
-        await add_to_aggregation_buffer(bot, event, message, images_base64, faces)
-    else:
-        await handle_single_chat(bot, event, message, images_base64, faces)
+    await add_to_aggregation_buffer(bot, event, message, images_base64, faces)
 
 
 @serialized_turn(lambda bot, event: session_key(event.user_id, getattr(event, "group_id", None)))

@@ -211,7 +211,6 @@ class IncomingPipelineTests(unittest.IsolatedAsyncioTestCase):
         with (
             patch.object(chat, "download_images_as_base64", AsyncMock(side_effect=download)),
             patch.object(chat, "_capture_incoming_images") as capture,
-            patch.object(chat.config, "enable_message_aggregation", True),
             patch.object(chat, "add_to_aggregation_buffer", AsyncMock()) as aggregate,
             patch.object(chat, "handle_single_chat", AsyncMock()) as single,
         ):
