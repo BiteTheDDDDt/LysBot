@@ -44,10 +44,11 @@ class ModelIdentityTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(model_identity._strip_existing_model_label('磷叶石（休息中）（Google:gemini-old）'), '磷叶石（休息中）')
         self.assertEqual(model_identity._strip_existing_model_label('磷叶石（休息中'), '磷叶石（休息中')
 
-    async def test_truncated_opus_is_replaced_with_short_copilot_label(self):
+    async def test_truncated_opus_is_replaced_without_changing_card_format(self):
         old = '磷叶石（CLIProxyAPI/Antigravity:claude-opus-4-6-thinking'
-        target = '磷叶石（Copilot:gpt-4o）'
-        for current in (old, old + '（CLIProxyAPI/azure openai:gpt-4o）'):
+        target = '磷叶石（CLIProxyAPI/azure openai:gpt-4o）'
+        model_identity._proxy_owners['copilot/gpt-4o'] = 'Azure OpenAI'
+        for current in (old, old + '（CLIProxyAPI/azure openai:gpt-4o）', '磷叶石（Copilot:gpt-4o）', '磷叶石（claude-opus-4-6-thinking）'):
             bot = SimpleNamespace(self_id='42', get_group_member_info=AsyncMock(side_effect=[{'card': current}, {'card': target}]), set_group_card=AsyncMock())
             with patch.object(model_identity, 'refresh_proxy_model_identity', AsyncMock()):
                 await model_identity.update_group_card_for_response(bot, 7, SimpleNamespace(model_spec='cliproxyapi:copilot/gpt-4o'))
@@ -57,15 +58,17 @@ class ModelIdentityTests(unittest.IsolatedAsyncioTestCase):
             model_identity._group_last_cards.clear()
 
     def test_group_card_fits_utf8_budget_without_editing_base_name(self):
-        base = '长' * 12
-        card = model_identity._fit_group_card(base, 'CLIProxyAPI/Antigravity:gpt-4o')
-        self.assertEqual(card, base + '（gpt-4o）')
+        base = '长' * 4
+        card = model_identity._fit_group_card(base, 'CLIProxyAPI/Antigravity:claude-opus-4-6-thinking')
+        self.assertTrue(card.startswith(base + '（CLIProxyAPI/Antigravity:claude-opus-4-6'))
+        self.assertTrue(card.endswith('…）'))
         self.assertLessEqual(len(card.encode('utf-8')), 60)
+        self.assertEqual(model_identity._strip_existing_model_label(card), base)
         self.assertIsNone(model_identity._fit_group_card('长' * 19, 'Copilot:gpt-4o'))
 
     async def test_readback_mismatch_is_not_cached_and_next_reply_retries(self):
         old = {'card': '磷叶石（CLIProxyAPI/Antigravity:claude-opus-4-6-thinking'}
-        target = {'card': '磷叶石（Copilot:gpt-4o）'}
+        target = {'card': '磷叶石（CLIProxyAPI:gpt-4o）'}
         bot = SimpleNamespace(self_id='42', get_group_member_info=AsyncMock(side_effect=[old, old, old, old, target]), set_group_card=AsyncMock())
         response = SimpleNamespace(model_spec='cliproxyapi:copilot/gpt-4o')
         with patch.object(model_identity, 'refresh_proxy_model_identity', AsyncMock()):

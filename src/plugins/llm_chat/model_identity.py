@@ -134,22 +134,18 @@ def _strip_existing_model_label(name: str) -> str:
     return text
 
 
-def _group_card_label(spec: str) -> str:
-    provider, _, model_id = spec.strip().partition(":")
-    if provider in {"cliproxyapi", "codexproxy", "openai"} and model_id.startswith("copilot/"):
-        return f"Copilot:{format_model_label(model_id)}"
-    return format_model_spec_label(spec)
-
-
 def _fit_group_card(base: str, label: str) -> str | None:
     budget = _GROUP_CARD_MAX_BYTES - len(f"{base}（）".encode("utf-8"))
     if len(label.encode("utf-8")) > budget:
-        # Preserve the user's base name; omit the provider before giving up.
-        label = label.rpartition(":")[2]
-        if not _MODEL_ID_RE.match(label):
+        # Preserve both the user's base name and the established provider prefix.
+        prefix, colon, model = label.partition(":")
+        room = budget - len(f"{prefix}{colon}…".encode("utf-8"))
+        if not colon or not _MODEL_PROVIDER_RE.match(label) or room < 8:
             return None
-    if len(label.encode("utf-8")) > budget:
-        return None
+        clipped = model.encode("utf-8")[:room].decode("utf-8", errors="ignore").rstrip()
+        if not clipped:
+            return None
+        label = f"{prefix}:{clipped}…"
     return f"{base}（{label}）"
 
 
@@ -176,7 +172,7 @@ async def update_group_card_for_response(bot: Any, group_id: int | None, respons
     try:
         async with asyncio.timeout(5):
             await refresh_proxy_model_identity()
-            label = _group_card_label(spec)
+            label = format_model_spec_label(spec)
             if not label:
                 return
             cached = _group_last_cards.get(key)
