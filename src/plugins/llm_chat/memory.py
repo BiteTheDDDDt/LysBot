@@ -624,6 +624,9 @@ class MemoryManager:
         safe_limit = max(1, min(int(limit or 16), 100))
         return list(visible[-safe_limit:])
 
+    async def briefing_activity(self, session_id: str, end: datetime) -> list[dict]:
+        return await self._digests.briefing_activity(session_id, end)
+
     async def get_digest_messages(self, session_id: str, start: datetime, end: datetime) -> tuple[List[Message], int]:
         return await self._digests.get_digest_messages(
             session_id,

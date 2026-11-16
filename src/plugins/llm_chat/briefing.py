@@ -23,6 +23,7 @@ from .memory import memory_manager
 from .models import model_manager, Message as LLMMessage
 from .utils import clean_response
 from . import usage_db
+from .briefing_activity import fetch_leader_avatars, render_activity_chart
 from .model_identity import format_model_spec_label, refresh_proxy_model_identity, label_usage_models
 from .paths import data_path
 from .image_generation import generate_image
@@ -206,7 +207,6 @@ def _format_llm_stats_lines(stats: dict) -> list[str]:
 
 def build_briefing_text(card_data: dict) -> str:
     """生成文本版简报，用于发送失败兜底。"""
-    topics = card_data.get("topics") or ["今天的话题过于松散，硬拎出来都像在加班。"]
     member_heading, active_members = briefing_member_section(card_data)
     subtitle = card_data.get("subtitle") or "过去 24 小时群聊速览"
     briefing_model = card_data.get("briefing_model")
@@ -219,12 +219,13 @@ def build_briefing_text(card_data: dict) -> str:
         parts.extend(["", f"🧠 简报模型：{briefing_model}"])
     parts.extend([
         "",
-        "🔥 热门话题",
-        *[f"• {item}" for item in topics[:TOPIC_LIMIT]],
-        "",
         f"💬 {member_heading}",
         *[f"• {item}" for item in active_members[:MEMBER_LIMIT]],
     ])
+    if days := card_data.get("activity_days"):
+        parts.extend(["", "📈 近 7 日群聊消息量"])
+        parts.extend(f"{day['date'][5:]} · {day['total']:,} 条" +
+                     (f" · 最高 {day['leader_count']:,} 条" if day['leader_count'] else "") for day in days)
     llm_stats = card_data.get("llm_stats")
     if llm_stats:
         parts.append("")
@@ -500,9 +501,14 @@ async def generate_member_portraits(
 
 
 def render_briefing_image(card_data: dict, group_name: str, group_id: int, date_label: str,
-                          activity_text: str, portrait: Image.Image | None = None, member_portraits: Image.Image | None = None) -> Image.Image:
-    return render_card("briefing", card_data, group_name=group_name, group_id=group_id,
-                       date_label=date_label, activity_text=activity_text, portrait=portrait, member_portraits=member_portraits)
+                          activity_text: str, portrait: Image.Image | None = None,
+                          member_portraits: Image.Image | None = None, avatars=None) -> Image.Image:
+    context = dict(group_name=group_name, group_id=group_id, date_label=date_label,
+                   activity_text=activity_text, portrait=portrait, member_portraits=member_portraits)
+    if days := card_data.get("activity_days"):
+        with render_activity_chart(days, avatars or {}) as chart:
+            return render_card("briefing", card_data, activity_chart=chart, **context)
+    return render_card("briefing", card_data, **context)
 
 
 def save_briefing_image(image: Image.Image, group_id: int) -> Path:
@@ -552,6 +558,7 @@ async def _send_daily_briefing_impl(
     # 获取过去24小时的时间戳
     window_end = datetime.combine(target_date, time(hour=hour, minute=minute))
     cutoff_time = window_end - timedelta(hours=24)
+    avatar_cache: dict[int, bytes | None] = {}
 
     for group_info in groups:
         group_id = group_info.get("group_id")
@@ -618,7 +625,7 @@ async def _send_daily_briefing_impl(
                     '  "portrait_prompt": "150-300字的横版群像插画场景，描绘当天代表性的群聊互动"\n'
                     "}\n\n"
                     "【要求】\n"
-                    "1. 热门话题按实际材料输出1-5个，每个话题都要带一点具体细节或群友态度，不能只写名词。\n"
+                    "1. topics 提供1-5条简短线索，供群像取材和后续新闻选题。\n"
                     "2. active_members 是‘今日群友画像’，有足够本人发言可支撑时选4位当日表现鲜明的群友，材料不足可少选或留空。"
                     "每人根据当天表现创造一个人格标签，comment 用30-50字突出此人的鲜明特质与反差，结合具体言行提供辨识度，"
                     "用本批资料写此人今天表现出的特质，每天重新提炼。"
@@ -666,6 +673,12 @@ async def _send_daily_briefing_impl(
                         await label_usage_models(card_data["llm_stats"])
                     except Exception as stats_err:
                         logger.warning(f"[每日简报] 群 {group_id} 拉取 token 统计失败: {stats_err}")
+                    avatars = {}
+                    try:
+                        card_data["activity_days"] = await memory_manager.briefing_activity(current_session_id, window_end)
+                        avatars = await fetch_leader_avatars(card_data["activity_days"], avatar_cache)
+                    except (sqlite3.Error, OSError) as error:
+                        logger.warning(f"[每日简报] 群 {group_id} 读取活跃统计失败: {type(error).__name__}")
                     portrait = await generate_briefing_portrait(card_data, group_id, target_date)
                     async with execution_scope(ExecutionPolicy("briefing.card", permission="send", check_result=False)) as resources:
                         if portrait is not None:
@@ -676,7 +689,7 @@ async def _send_daily_briefing_impl(
                         image = await resources.create(lambda: render_briefing_image(
                             card_data=card_data, group_name=group_name, group_id=group_id,
                             date_label=target_date.isoformat(), activity_text=message_count_text,
-                            portrait=portrait, member_portraits=member_portraits,
+                            portrait=portrait, member_portraits=member_portraits, avatars=avatars,
                         ), lambda image: image.close())
                         image_path = await resources.create(lambda: save_briefing_image(image, group_id), cleanup_briefing_image)
                         await deliver_briefing(bot, group_id, card_data, image_path, briefing_date=target_date)

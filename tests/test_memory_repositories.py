@@ -69,6 +69,28 @@ class MemoryRepositoryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(count, 3)
         self.assertEqual([message.content for message in messages], ["before", "fixture", "after"])
 
+    async def test_briefing_activity_preserves_zero_days_and_group_scope(self):
+        db = await self.manager._get_db()
+        def row(ts, sender, *, group="group_71", role="user"):
+            return group, role, sender, "fixture", f"2026-11-{ts}"
+
+        await db.executemany(
+            "INSERT INTO messages_detail(session_id,role,sender_id,content,timestamp) VALUES(?,?,?,?,?)",
+            [row("09T23:59:59", 12), row("10T00:00:00", 12), row("10T12:00:00", 10),
+             row("10T13:00:00", 10), row("10T15:00:00", 10, role="assistant"),
+             row("10T16:00:00", 99, group="group_72"), row("16T23:59:59", 12),
+             row("17T00:00:00", 12), row("17T23:30:00", 12)],
+        )
+        await db.commit()
+        days = await self.manager.briefing_activity("group_71", datetime(2026, 11, 17))
+        self.assertEqual(len(days), 7)
+        self.assertEqual(days[0], {"date": "2026-11-10", "total": 3, "leader_id": 10, "leader_count": 2})
+        self.assertEqual(days[1], {"date": "2026-11-11", "total": 0, "leader_id": None, "leader_count": 0})
+        self.assertEqual(days[-1], {"date": "2026-11-16", "total": 1, "leader_id": 12, "leader_count": 1})
+        evening = await self.manager.briefing_activity("group_71", datetime(2026, 11, 17, 23, 30))
+        self.assertEqual(evening[0]["date"], "2026-11-11")
+        self.assertEqual(evening[-1], {"date": "2026-11-17", "total": 1, "leader_id": 12, "leader_count": 1})
+
     async def test_schema_migrates_legacy_rows_and_is_repeatable(self):
         async with aiosqlite.connect(self.manager._db_path) as db:
             await db.execute("""CREATE TABLE messages_detail (

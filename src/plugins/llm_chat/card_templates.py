@@ -8,7 +8,6 @@ from .card_renderer import (
     ACCENT_VIOLET,
     ACCENT_CORAL,
     ACCENT_BLUE,
-    TEXT_TOPIC,
     TEXT_MEMBER,
     TEXT_SUMMARY,
 )
@@ -71,30 +70,24 @@ def format_usage_lines(stats):
     return usage_totals(stats) + [f"{name}  ·  {total}" for name, total, _ in usage_models(stats)]
 
 
-def build_card(template, data, *, group_name, group_id, date_label, activity_text="", portrait=None, member_portraits=None):
+def build_card(template, data, *, group_name, group_id, date_label, activity_text="", portrait=None,
+               member_portraits=None, activity_chart=None):
     label = f"{date_label}  ·  {str(group_name or group_id)[:48]}"
     blocks = []
     if template == "briefing":
         member_heading, member_entries = briefing_member_section(data)
         if portrait is not None:
             blocks.append(CardBlock("每日群像", image=portrait, accent=ACCENT_VIOLET))
-        blocks.extend(
-            [
-                CardBlock(
-                    "热门话题",
-                    [f"• {s}" for s in (data.get("topics") or ["今天的话题有点散。"])[:5]],
-                    body_color=TEXT_TOPIC,
-                ),
-                CardBlock(
-                    member_heading,
-                    [] if member_portraits is not None else member_entries,
-                    image=member_portraits,
-                    image_max_height=1600,
-                    accent=ACCENT_VIOLET,
-                    body_color=TEXT_MEMBER,
-                ),
-            ]
-        )
+        blocks.append(CardBlock(
+            member_heading,
+            [] if member_portraits is not None else member_entries,
+            image=member_portraits,
+            image_max_height=1600,
+            accent=ACCENT_VIOLET,
+            body_color=TEXT_MEMBER,
+        ))
+        if activity_chart is not None:
+            blocks.append(CardBlock("群聊数据", image=activity_chart, accent=ACCENT_CYAN))
         stats = data.get("llm_stats")
         if stats:
             blocks.append(CardBlock("AI 调用统计", format_usage_lines(stats), accent=ACCENT_BLUE, body_size=23))

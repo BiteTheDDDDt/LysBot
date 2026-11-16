@@ -1,7 +1,7 @@
 """Published briefing/news persistence using the shared memory transaction lock."""
 import asyncio
 import json
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Awaitable, Callable, Dict, List, Optional
 
 import aiosqlite
@@ -47,6 +47,33 @@ class DigestRepository:
                 messages.append(Message(role=role,name=name,sender_id=sender_id,content=text,timestamp=timestamp,source_id=source_id))
         return messages, int(total_users)
 
+
+    async def briefing_activity(self, session_id: str, end: datetime) -> list[dict]:
+        """Count seven calendar dates up to the scheduled briefing, exclusive."""
+        last_day = (end - timedelta(microseconds=1)).date()
+        start = last_day - timedelta(days=6)
+        db = await self._get_db()
+        async with db.execute("""
+            WITH counts AS (
+                SELECT substr(timestamp, 1, 10) AS day, sender_id, COUNT(*) AS count
+                FROM messages_detail
+                WHERE session_id=? AND timestamp>=? AND timestamp<?
+                  AND role='user' AND sender_id>0 AND COALESCE(is_thinking, 0)=0
+                GROUP BY day, sender_id
+            ), ranked AS (
+                SELECT day, sender_id, count, SUM(count) OVER(PARTITION BY day) AS total,
+                       ROW_NUMBER() OVER(PARTITION BY day ORDER BY count DESC, sender_id) AS rank
+                FROM counts
+            )
+            SELECT day, total, sender_id, count FROM ranked WHERE rank=1
+        """, (session_id, start.isoformat(), end.isoformat())) as cursor:
+            counted = {day: (total, user_id, count) for day, total, user_id, count in await cursor.fetchall()}
+        result = []
+        for index in range(7):
+            day = (start + timedelta(days=index)).isoformat()
+            total, user_id, count = counted.get(day, (0, None, 0))
+            result.append({"date": day, "total": total, "leader_id": user_id, "leader_count": count})
+        return result
 
     async def recent_news_urls(self, group_id: int, since: datetime) -> set[str]:
         db = await self._get_db()

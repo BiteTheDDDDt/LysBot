@@ -158,6 +158,7 @@ class DeliveryOutboxTests(unittest.IsolatedAsyncioTestCase):
             patch.object(briefing.config, "enable_daily_briefing", True),
             patch.object(briefing.memory_manager, "has_published_briefing_for_date", AsyncMock(return_value=False)),
             patch.object(briefing.memory_manager, "get_digest_messages", AsyncMock(return_value=([message], 1000))),
+            patch.object(briefing.memory_manager, "briefing_activity", AsyncMock(return_value=[])),
             patch.object(briefing.model_manager, "chat", AsyncMock(side_effect=generate)),
             patch.object(briefing.usage_db, "query_session", AsyncMock(return_value={})),
             patch.object(briefing, "generate_briefing_portrait", AsyncMock(return_value=None)),

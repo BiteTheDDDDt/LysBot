@@ -20,6 +20,11 @@ nonebot.init()
 from src.plugins.llm_chat import briefing
 
 
+def activity_fixture():
+    return [{"date": f"2026-10-{day:02}", "total": day * 10,
+             "leader_id": 42, "leader_count": day} for day in range(6, 13)]
+
+
 class BriefingAttemptTests(unittest.TestCase):
     def test_attempt_budget_survives_reopening_and_expires_old_records(self):
         now = datetime(2026, 10, 21)
@@ -162,15 +167,17 @@ class BriefingRenderTests(unittest.TestCase):
             return original(draw, xy, text, *args, **kwargs)
         with patch.object(ImageDraw.ImageDraw, "text", capture):
             briefing.render_briefing_image(
-                {"briefing_model": "internal-model", "topics": ["话题"], "summary": "总结"},
+                {"briefing_model": "internal-model", "topics": ["话题"], "summary": "总结",
+                 "activity_days": activity_fixture()},
                 "测试群", 123, "2026-10-16", "200 条群聊消息",
                 portrait=Image.new("RGB", (1536, 1024)),
             )
         text = "\n".join(drawn)
         self.assertIn("internal-model", text)
-        for removed in ("Group ID", "并非成员真实照片", "群聊的一天"):
+        for removed in ("Group ID", "并非成员真实照片", "群聊的一天", "热门话题"):
             self.assertNotIn(removed, text)
-        self.assertLess(drawn.index("每日群像"), drawn.index("热门话题"))
+        self.assertLess(drawn.index("每日群像"), drawn.index("今日群友画像"))
+        self.assertLess(drawn.index("今日群友画像"), drawn.index("群聊数据"))
 
     def test_editorial_briefing_image_renders_dynamic_sections(self):
         image = briefing.render_briefing_image(
@@ -180,6 +187,7 @@ class BriefingRenderTests(unittest.TestCase):
                 "topics": ["群友在讨论大模型和新显卡。"],
                 "active_members": ["群友甲：贡献了实测记录。"],
                 "summary": "今天的信息密度很高。",
+                "activity_days": activity_fixture(),
             },
             "测试群",
             123,
@@ -226,6 +234,8 @@ class BriefingDeliveryTests(unittest.IsolatedAsyncioTestCase):
                 patch.object(briefing.config, "briefing_enable_portrait", True),
                 patch.object(briefing.memory_manager, "has_published_briefing_for_date", AsyncMock(return_value=False)),
                 patch.object(briefing.memory_manager, "get_digest_messages", AsyncMock(return_value=([msg], 1000))),
+                patch.object(briefing.memory_manager, "briefing_activity", AsyncMock(return_value=activity_fixture())) as activity,
+                patch.object(briefing, "fetch_leader_avatars", AsyncMock(return_value={42: b"invalid avatar"})),
                 patch.object(briefing.model_manager, "chat", AsyncMock(return_value=json.dumps({
                     "topics": ["显卡评测"], "portrait_prompt": "群友围着显卡讨论",
                     "active_members": [{"user_id": 42, "personality_tag": "原文质检员", "comment": "结论不算数，跑过再签字。", "source_ids": [101]}],
@@ -247,6 +257,9 @@ class BriefingDeliveryTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("从当天的具体言行提炼人物特质", prompt)
                 self.assertIn("不限类别", prompt)
                 saved_card = record.await_args.args[1]
+                activity.assert_awaited_once_with("group_123", datetime(2026, 10, 13))
+                self.assertEqual(saved_card["activity_days"], activity_fixture())
+                self.assertNotIn("热门话题", briefing.build_briefing_text(saved_card))
                 self.assertEqual(saved_card["active_members"][0]["name"], "群友甲")
                 self.assertEqual(saved_card["active_members"][0]["source_ids"], [101])
                 bot.send_group_msg.assert_awaited_once()
@@ -277,6 +290,7 @@ class BriefingDeliveryTests(unittest.IsolatedAsyncioTestCase):
             patch.object(briefing.config, "enable_daily_briefing", True),
             patch.object(briefing.memory_manager, "has_published_briefing_for_date", AsyncMock(return_value=False)),
             patch.object(briefing.memory_manager, "get_digest_messages", AsyncMock(return_value=([msg], 0))) as messages,
+            patch.object(briefing.memory_manager, "briefing_activity", AsyncMock(return_value=[])),
             patch.object(briefing.model_manager, "chat", AsyncMock(side_effect=["{}", '{"topics":["测试"]}'])) as model,
             patch.object(briefing.usage_db, "query_session", AsyncMock(return_value={})),
             patch.object(briefing, "generate_briefing_portrait", AsyncMock(return_value=None)) as portrait,
