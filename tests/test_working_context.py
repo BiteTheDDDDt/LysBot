@@ -95,6 +95,45 @@ class WorkingContextTests(unittest.IsolatedAsyncioTestCase):
         MemoryManager._instance = None
         self.tmp.cleanup()
 
+    async def test_group_request_prefetches_older_source_from_same_author_only(self):
+        from src.plugins.llm_chat import tools
+        from src.plugins.llm_chat.model_turn import _recent_author_matches
+
+        sid = "group_7"
+        request = "让你的relaybot讲个段子"
+        await self.db.executemany(
+            "INSERT INTO messages_detail(session_id,role,name,sender_id,content,timestamp) VALUES(?,?,?,?,?,?)",
+            [(group, "user", "成员", author, content, "2026-09-01T10:00:00") for group, author, content in (
+                (sid, 101, "以后 relaybot 指 @团子(QQ:707)"),
+                (sid, 101, request),
+                (sid, 202, "别人的 relaybot"),
+                ("group_8", 101, "另一个群的 relaybot"),
+            )],
+        )
+        await self.db.commit()
+        tools.set_poke_context(group_id=7, user_id=101, current_user_text=request,
+                               history_request_texts=[request])
+        token = models.current_session_id.set(sid)
+        try:
+            with patch.object(agent_runner, "_runtime_path", self.manager._db_path), \
+                 patch("src.plugins.llm_chat.memory.memory_manager", self.manager):
+                runner = agent_runner.AgentRunner(sid, 60)
+                await runner.start([models.Message("user", request, sender_id=101)])
+                run_token = agent_runner.current_run.set(runner)
+                try:
+                    reference = await _recent_author_matches(runner)
+                    self.assertTrue(reference.is_reference)
+                    self.assertIn("QQ:707", reference.content)
+                    self.assertNotIn(request, reference.content)
+                    self.assertNotIn("别人的", reference.content)
+                    self.assertNotIn("另一个群", reference.content)
+                    await runner.finish("complete")
+                finally:
+                    agent_runner.current_run.reset(run_token)
+        finally:
+            models.current_session_id.reset(token)
+            tools.clear_poke_context()
+
     async def test_reply_model_survives_reload_and_history_retrieval(self):
         from src.plugins.llm_chat.context_builder import _format_history_message
         with patch.object(self.manager, '_schedule_summary'):

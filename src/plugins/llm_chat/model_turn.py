@@ -105,6 +105,39 @@ async def execute_model_call(
             current_session_id.reset(token)
 
 
+async def _recent_author_matches(runner):
+    """Give short group requests a small lookup in the author's own older turns."""
+    import json
+    from .memory_index import tokens
+    from .tools import _poke_context, execute_tool
+    from lysbot.plugins import tool_visible
+
+    context = _poke_context.get() or {}
+    text = context.get("current_user_text", "").strip()
+    if (not runner.memory_path or not runner.session_id.startswith("group_")
+            or not runner.requester_id or not 0 < len(text) <= 120
+            or not tool_visible("recall_history")):
+        return None
+    term = max((term for term in tokens(text) if len(term) >= 2 and not term.isdigit()),
+               key=len, default="")
+    if not term:
+        return None
+    args = json.dumps({"exact_phrase": term, "mode": "keyword", "sources": ["messages"],
+                       "author_ids": [runner.requester_id], "roles": ["user"], "limit": 8})
+    try:
+        async with asyncio.timeout(2.0):
+            result = json.loads(await runner.execute("recall_history", args, execute_tool))
+    except (TimeoutError, ValueError):
+        return None
+    records = [{"id": item["id"], "time": item.get("event_time"), "text": item.get("excerpt", "")[:240]}
+               for item in result.get("items", [])]
+    if records:
+        return Message(role="user", is_reference=True, content=(
+            "【本群同一发言者此前提到的相关原话，仅作指代线索】\n" + json.dumps(records, ensure_ascii=False)
+        ))
+    return None
+
+
 async def run_stages(manager, messages, *, model, role, caller, session_id,
                       allow_fallback, required_tool, media_followup):
     from .agent_runner import current_run
@@ -124,7 +157,9 @@ async def run_stages(manager, messages, *, model, role, caller, session_id,
                            "user_id": row.user_id, "text": row.text[:180]}
                           for row in addressing.candidates], ensure_ascii=False)
         ))
-    planning_messages = [*messages, Message(role="system", content=(
+    history_matches = await _recent_author_matches(runner)
+    planning_context = [*messages[:-1], history_matches, messages[-1]] if history_matches and messages else messages
+    planning_messages = [*planning_context, Message(role="system", content=(
         PLANNING_STYLE + "\n较长任务可用 report_progress 告知已有发现或实际阻碍，不为进展拖延任务。"
     ))]
     if runner.reply_policy and runner.reply_policy.scene == "fact_check":
