@@ -1,6 +1,8 @@
 """QQ message addressing from events and verified group membership."""
 from dataclasses import dataclass, field
 import json
+import re
+import unicodedata
 
 from nonebot.adapters.onebot.v11 import Message, MessageSegment
 
@@ -10,6 +12,7 @@ class MessageTarget:
     message_id: int | None
     user_id: int
     text: str
+    names: tuple[str, ...] = ()
 
 
 @dataclass
@@ -36,9 +39,33 @@ class QQAddressing:
                 "引用用于承接原话，@用于叫到人，两者不等于正文的全部受众。"
                 "把任务交给某人时直接对他说；评论某人时可以说他。程序添加引用和@，正文无需拼QQ标签。")
 
-    def add_verified_member(self, user_id: int, name: str) -> None:
-        if str(user_id) != self.bot_self_id and all(row.user_id != user_id for row in self.candidates):
-            self.candidates += (MessageTarget(None, user_id, name),)
+    def add_verified_member(self, user_id: int, *names: str) -> None:
+        names = tuple(name for name in names if name)
+        target = MessageTarget(None, user_id, names[0] if names else "群成员", names)
+        if str(user_id) != self.bot_self_id and target not in self.candidates:
+            self.candidates += (target,)
+
+    def strip_repeated_mentions(self, text: str) -> str:
+        """Drop leading textual @s that duplicate native mentions in this turn."""
+        if not self.mentions or not (text or "").lstrip().startswith(("@", "＠")):
+            return text
+        names = {str(user_id) for user_id in self.mentions}
+        for target in self.candidates:
+            if target.user_id not in self.mentions:
+                continue
+            for name in target.names:
+                alias = name.strip()
+                names.add(alias)
+                # The renderer sometimes leaves off a decorative final emoji.
+                while alias and unicodedata.category(alias[-1]) in {"So", "Mn", "Sk", "Cf"}:
+                    alias = alias[:-1].rstrip()
+                names.add(alias)
+        alternatives = "|".join(re.escape(name) for name in sorted(names - {""}, key=lambda name: (-len(name), name)))
+        prefix = re.compile(rf"^\s*[@＠](?:{alternatives})(?=$|[\s,，:：、])[\s,，:：、]*", re.IGNORECASE)
+        body = text
+        while match := prefix.match(body):
+            body = body[match.end():]
+        return body if body.strip() else text
 
     def revise(self, payload: dict) -> None:
         """Refine this turn's shared delivery object before any media is sent."""

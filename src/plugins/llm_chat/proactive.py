@@ -29,6 +29,7 @@ class RecentMessage:
     timestamp: float
     user_id: int
     message_id: int | None = None
+    sender_name: str = ""
 
 
 class ProactiveManager:
@@ -165,7 +166,9 @@ class ProactiveManager:
             return True
         return time.time() - self._last_spoke[group_id] > IDLE_THRESHOLD_SECONDS
 
-    def add_recent_message(self, group_id: int, content: str, user_id: int, message_id: int | None = None):
+    def add_recent_message(self, group_id: int, content: str, user_id: int, message_id: int | None = None,
+                           *, sender_name: str = ""):
+
         """添加最近消息到缓存"""
         from .image_observations import unsolicited_view
         content = unsolicited_view(content)
@@ -177,6 +180,7 @@ class ProactiveManager:
             timestamp=time.time(),
             user_id=user_id,
             message_id=message_id,
+            sender_name=sender_name,
         ))
 
         # 清理超过检查窗口的旧消息
@@ -189,7 +193,7 @@ class ProactiveManager:
     def get_recent_targets(self, group_id: int):
         from .qq_addressing import MessageTarget
         cutoff = time.time() - CHECK_WINDOW_SECONDS
-        return [MessageTarget(m.message_id, m.user_id, m.content)
+        return [MessageTarget(m.message_id, m.user_id, m.content, (m.sender_name,))
                 for m in self._recent_messages.get(group_id, [])[-12:] if m.timestamp > cutoff]
 
     def get_recent_messages_text(self, group_id: int, window_seconds: int = None) -> str:

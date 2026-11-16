@@ -29,6 +29,31 @@ class AddressingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(address.text("后半句", first=False), "后半句")
         self.assertEqual([s.type for s in address.text("[CQ:at,qq=999]", first=False)], ["text"])
 
+    async def test_native_mention_is_not_repeated_in_rendered_text(self):
+        from src.plugins.llm_chat.planner import PlannerDecision
+        from src.plugins.llm_chat.turns import send_response_turn
+
+        address = self.address({"reply_to_message_id": 11})
+        address.add_verified_member(202, "团子🐟", "另一个昵称")
+        address.revise({"mention_user_ids": [202]})
+        sent = AsyncMock()
+
+        async def send(text, first):
+            await sent(address.text(text, first=first))
+
+        turn = await send_response_turn(
+            text="@团子，来讲个笑话 @另一个人", decision=PlannerDecision(addressing=address),
+            planned_meme=None, send_text=send,
+        )
+        segments = sent.await_args.args[0]
+        self.assertEqual([segment.type for segment in segments], ["reply", "at", "text", "text"])
+        self.assertEqual(segments[1].data["qq"], "202")
+        self.assertEqual(segments[-1].data["text"], "来讲个笑话 @另一个人")
+        self.assertEqual(turn.text_for_memory, "来讲个笑话 @另一个人")
+        self.assertEqual(address.strip_repeated_mentions("@团子哥 你好"), "@团子哥 你好")
+        self.assertEqual(address.strip_repeated_mentions("@另一个昵称 你好"), "你好")
+        self.assertEqual(self.address({}).strip_repeated_mentions("@团子 你好"), "@团子 你好")
+
     def test_revision_inherits_omitted_fields_and_clears_explicit_empty_fields(self):
         address = self.address({"reply_to_message_id": 11, "mention_user_ids": [202]})
         address.revise({"audience_user_ids": [303]})

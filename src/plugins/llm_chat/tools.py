@@ -1244,7 +1244,7 @@ async def get_group_facts(scope: str, user_id: str = "") -> str:
         if run is not None and run.session_id == f"group_{group_id}":
             addressing = getattr(run.reply_policy, "addressing", None)
             if addressing is not None:
-                addressing.add_verified_member(target, row.get("card") or row.get("nickname") or "群成员")
+                addressing.add_verified_member(target, row.get("card") or "", row.get("nickname") or "")
     observed_at = datetime.now().isoformat(timespec="seconds")
     items = []
     for row in rows:

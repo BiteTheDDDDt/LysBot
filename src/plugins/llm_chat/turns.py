@@ -122,6 +122,8 @@ def build_turn_items(
     reply_policy: ReplyPolicy = SHORT_REPLY,
 ) -> list[tuple[str, str | dict]]:
     """Return ordered ('text'|'meme', payload) items, capped at two."""
+    if decision:
+        text = decision.addressing.strip_repeated_mentions(text)
     text = enforce_reply_budget(text, reply_policy)
     decision = constrain_plan(decision, reply_policy)
     clean_text = text.strip()

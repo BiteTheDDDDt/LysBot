@@ -21,6 +21,7 @@ from .proactive import proactive_manager
 from . import usage_db
 from .conversation import serialized_turn, session_key
 from .daily_luck import daily_luck_score
+from .qq_addressing import MessageTarget, QQAddressing
 
 
 memory_card_cmd = on_command("memory", aliases={"记忆回顾", "记忆卡片"}, priority=1, block=True)
@@ -47,13 +48,6 @@ async def handle_memory_card(event: MessageEvent):
         encoded = await asyncio.to_thread(render)
         ensure_send_allowed(group_id)
         await memory_card_cmd.finish(MessageSegment.image(encoded))
-
-
-def _build_at_reply(user_id: int, text: str) -> Message:
-    return Message([
-        MessageSegment.at(user_id),
-        MessageSegment.text(f" {text.strip()}")
-    ])
 
 
 async def _record_command_interaction(
@@ -521,9 +515,14 @@ async def handle_jrrp(event: MessageEvent, bot: Bot = None):
             response_text.model_spec = None
         final_text = f"今日人品 {jrrp_value}，今天先拿这个分数开局"
 
+    addressing = QQAddressing()
+    if group_id:
+        names = tuple(name for name in (event.sender.card, event.sender.nickname) if name)
+        addressing = QQAddressing(mention=user_id, candidates=(MessageTarget(None, user_id, "", names),))
+        final_text = addressing.strip_repeated_mentions(final_text)
     try:
-        await deliver_reply(response_text, final_text, lambda: jrrp_cmd.send(
-            _build_at_reply(user_id, final_text) if group_id else final_text), bot=bot, group_id=group_id)
+        await deliver_reply(response_text, final_text, lambda: jrrp_cmd.send(addressing.text(final_text)),
+                            bot=bot, group_id=group_id)
     except Exception as e:
         logger.warning(f"[jrrp] 发送回复失败 user={user_id} group={group_id}: {e}")
         return
@@ -557,7 +556,6 @@ async def _investigate_recent(bot: Bot, event: MessageEvent, topic: str):
     from .agent_runner import deliver_reply
     from .chat import _send_research_progress
     from .context_builder import build_context_messages
-    from .qq_addressing import QQAddressing
     from .reply_policy import ReplyPolicy
     from .tools import clear_poke_context, set_poke_context
     from .utils import clean_response

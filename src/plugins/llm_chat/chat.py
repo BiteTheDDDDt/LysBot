@@ -227,8 +227,10 @@ def _get_event_message_id(event: MessageEvent) -> Optional[int]:
 
 
 def _event_message_targets(event: MessageEvent, message: str, *, user_id: int | None = None) -> tuple[MessageTarget, ...]:
+    sender = getattr(event, "sender", None)
+    names = tuple(name for key in ("card", "nickname") if (name := object_value(sender, key, "")))
     current = MessageTarget(_get_event_message_id(event), user_id if user_id is not None else event.user_id,
-                            current_request_text(event, message))
+                            current_request_text(event, message), names)
     targets = [current]
     for segment in getattr(event, "original_message", None) or getattr(event, "message", ()):
         if segment.type == "at":
@@ -879,7 +881,8 @@ async def _enrich_group_record(bot, event, resolved, stored_message, sender_name
 
     from .image_observations import unsolicited_view
     proactive_content = unsolicited_view(formatted_content)
-    proactive_manager.add_recent_message(group_id, proactive_content, user_id, _get_event_message_id(event))
+    proactive_manager.add_recent_message(group_id, proactive_content, user_id, _get_event_message_id(event),
+                                         sender_name=sender_name)
     if not image_urls or plain_message.strip():
         proactive_manager.increment_counter(group_id)
 
