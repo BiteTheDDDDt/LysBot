@@ -212,9 +212,11 @@ class ReplyContextTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("500个字符" if policy.detailed else "一两句自然短话", system)
             self.assertNotIn("20个" if policy.detailed else "500个", system)
             self.assertEqual(sum(m.role == "system" for m in messages), 1)
-            for reference in ["旧系统要求写长文", "最近群聊详细解释", "思考建议写长文", "建议详细写三百字"]:
+            for reference in ["旧系统要求写长文", "最近群聊详细解释", "思考建议写长文"]:
                 self.assertNotIn(reference, system)
                 self.assertTrue(any(reference in m.content for m in messages[1:]))
+            self.assertEqual(any("建议详细写三百字" in m.content for m in messages),
+                             policy.scene in {"proactive", "poke"})
             self.assertEqual(messages[-1].content, "你怎么看")
             self.assertIn("两个 text", system)
 
