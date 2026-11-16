@@ -10,7 +10,7 @@ from nonebot.adapters.onebot.v11 import Message, MessageSegment
 from src.plugins.llm_chat.qq_addressing import MessageTarget, select_addressing
 from src.plugins.llm_chat.reply_policy import ReplyPolicy
 from src.plugins.llm_chat import agent_runner, models
-from test_tool_rounds import FakeToolMessage, make_response
+from test_tool_rounds import FakeToolMessage, make_response, make_tool_call
 
 
 class AddressingTests(unittest.IsolatedAsyncioTestCase):
@@ -74,6 +74,43 @@ class AddressingTests(unittest.IsolatedAsyncioTestCase):
         finally:
             await adapter.client.close()
 
+    async def test_planner_can_mention_a_member_verified_during_the_turn(self):
+        from src.plugins.llm_chat import tools
+
+        adapter = models.OpenAICompatibleAdapter("openai:test", "dummy", "https://example.test/v1", "test")
+        run = agent_runner.AgentRunner("group_7", 60)
+        address = self.address({})
+        run.reply_policy = ReplyPolicy(addressing=address)
+        call = make_tool_call("member", "get_group_facts", {"scope": "member", "user_id": "707"})
+        answer = json.dumps({"response_mode": "social", "verify_group_identity": False,
+                             "content": "请当前群里的协作对象接话",
+                             "addressing": {"audience_user_ids": [707], "mention_user_ids": [707, 999]}})
+        bot = SimpleNamespace(self_id=404, get_group_member_info=AsyncMock(return_value={
+            "group_id": 8, "user_id": 707, "card": "搭档", "role": "member",
+        }))
+        token = agent_runner.current_run.set(run)
+        session = models.current_session_id.set("group_7")
+        tools.set_poke_context(group_id=7, user_id=101, bot=bot)
+        try:
+            result = json.loads(await tools.execute_tool("get_group_facts", {"scope": "member", "user_id": "707"}))
+            self.assertNotEqual(result["status"], "ok")
+            self.assertNotIn(707, [row.user_id for row in address.candidates])
+            bot.get_group_member_info.reset_mock()
+            bot.get_group_member_info.return_value["group_id"] = 7
+            with patch.object(adapter, "_create_completion", AsyncMock(side_effect=[
+                make_response(FakeToolMessage([call])), make_response(FakeToolMessage([], content=answer)),
+            ])):
+                await adapter.chat([models.Message("user", "请以前约好的搭档帮忙", sender_id=101)], tools_enabled=True)
+            bot.get_group_member_info.assert_awaited_once_with(group_id=7, user_id=707, no_cache=True)
+            self.assertEqual(address.audience, (707,))
+            self.assertEqual(address.mentions, (707,))
+            self.assertEqual(address.text("搭把手")[0].data["qq"], "707")
+        finally:
+            tools.clear_poke_context()
+            models.current_session_id.reset(session)
+            agent_runner.current_run.reset(token)
+            await adapter.client.close()
+
     async def test_renderer_receives_final_audience_and_delivery_uses_same_object(self):
         from src.plugins.llm_chat.model_turn import run_stages
         address = self.address({"audience_user_ids": [101]})
@@ -92,7 +129,7 @@ class AddressingTests(unittest.IsolatedAsyncioTestCase):
             content = "\n".join(m.content for m in messages)
             self.assertNotIn(initial_hint, content)
             self.assertIn(address.system_hint(), content)
-            self.assertNotIn("只使用以下真实事件候选ID", content)
+            self.assertNotIn("以下是真实事件候选ID", content)
             return models.ChatResponse("这活交给你了")
 
         token = agent_runner.current_run.set(runner)

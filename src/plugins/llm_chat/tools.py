@@ -1230,13 +1230,21 @@ async def get_group_facts(scope: str, user_id: str = "") -> str:
     elif (scope == "bot" and not user_id) or member_query:
         target = self_id if scope == "bot" else int(user_id)
         row = await bot.get_group_member_info(group_id=group_id, user_id=target, no_cache=True)
-        if str(row.get("user_id")) != str(target):
+        if (str(row.get("user_id")) != str(target)
+                or str(row.get("group_id") or group_id) != str(group_id)):
             return json.dumps(failure("member_not_verified"), ensure_ascii=False)
         rows = [row]
     else:
         return json.dumps(failure("invalid_group_facts_query", invalid=True), ensure_ascii=False)
 
     ensure_current_session()
+    if member_query and target != self_id:
+        from .agent_runner import current_run
+        run = current_run.get()
+        if run is not None and run.session_id == f"group_{group_id}":
+            addressing = getattr(run.reply_policy, "addressing", None)
+            if addressing is not None:
+                addressing.add_verified_member(target, row.get("card") or row.get("nickname") or "群成员")
     observed_at = datetime.now().isoformat(timespec="seconds")
     items = []
     for row in rows:

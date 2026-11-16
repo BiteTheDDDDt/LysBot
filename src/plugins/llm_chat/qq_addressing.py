@@ -1,4 +1,4 @@
-"""QQ message addressing selected from trusted event metadata."""
+"""QQ message addressing from events and verified group membership."""
 from dataclasses import dataclass, field
 import json
 
@@ -35,6 +35,10 @@ class QQAddressing:
                 + "\n audience_user_ids 是正文主要对谁说，空列表表示面向当前话题或群体。"
                 "引用用于承接原话，@用于叫到人，两者不等于正文的全部受众。"
                 "把任务交给某人时直接对他说；评论某人时可以说他。程序添加引用和@，正文无需拼QQ标签。")
+
+    def add_verified_member(self, user_id: int, name: str) -> None:
+        if str(user_id) != self.bot_self_id and all(row.user_id != user_id for row in self.candidates):
+            self.candidates += (MessageTarget(None, user_id, name),)
 
     def revise(self, payload: dict) -> None:
         """Refine this turn's shared delivery object before any media is sent."""

@@ -362,7 +362,7 @@ GROUP_FACTS_TOOL = {
     "function": {
         "name": "get_group_facts",
         "description": "从 QQ 实时读取当前群的事实。bot 返回你当前显示的群名片（可能含模型名）与 QQ 昵称；"
-        "leadership 返回群主和管理员；member 按当前群已知的 QQ 号读取该成员的群名片。群号由会话提供。",
+        "leadership 返回群主和管理员；member 按当前群已知的 QQ 号读取该成员的群名片，并将确认的成员加入本轮可用的收话人和 @ 候选。群号由会话提供。",
         "parameters": {"type": "object", "properties": {
             "scope": {"type": "string", "enum": ["bot", "leadership", "member"]},
             "user_id": {"type": "string", "description": "仅 member 时填写当前群成员的 QQ 号。"},

@@ -119,7 +119,7 @@ async def run_stages(manager, messages, *, model, role, caller, session_id,
         planning_address_message = Message(role="system", content=(
             "最终 JSON 可用 addressing 调整说话对象与送达，字段为 audience_user_ids、mention_user_ids 数组和 reply_to_message_id。"
             "省略字段继承参与规划，空数组或 null 清除对应选择。收话人、引用来源、@分别决定。"
-            "媒体工具沿用参与规划的送达，媒体已经发送后本轮送达保持不变。只使用以下真实事件候选ID。\n"
+            "媒体工具沿用参与规划的送达，媒体已经发送后本轮送达保持不变。引用从以下消息候选选；收话人和 @ 也可以用本轮 get_group_facts(scope=member) 确认在本群的成员。以下是真实事件候选ID。\n"
             + json.dumps([{"message_id": row.message_id if addressing.allow_reply else None,
                            "user_id": row.user_id, "text": row.text[:180]}
                           for row in addressing.candidates], ensure_ascii=False)
