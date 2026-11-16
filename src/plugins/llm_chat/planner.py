@@ -132,7 +132,6 @@ class PlannerDecision:
             hints.append(f"原因: {self.reason}")
         if include_reasoning and self.reply_hint:
             hints.append(f"回复侧重点: {self.reply_hint}")
-        hints.append(self.addressing.system_hint())
         if self.action == "close":
             hints.append(
                 "本轮是话题收束：只说一句自然、简短的结束语，不提出新问题，"

@@ -146,7 +146,6 @@ async def run_stages(manager, messages, *, model, role, caller, session_id,
     runner = current_run.get()
     runner.revise_output = True
     addressing = getattr(runner.reply_policy, "addressing", None)
-    initial_address_hint = addressing.system_hint() if addressing is not None else ""
     if addressing is not None and addressing.candidates:
         import json
         planning_address_message = Message(role="system", content=(
@@ -167,8 +166,10 @@ async def run_stages(manager, messages, *, model, role, caller, session_id,
             "用 start_fact_check 看刚才聊了什么。优先查指定主题或引用，否则挑一句值得查的。"
             "直接说查到什么，顺手带上依据。"
         )))
-    if addressing is not None and addressing.candidates:
-        planning_messages.append(planning_address_message)
+    if addressing is not None:
+        planning_messages.append(Message(role="system", content=addressing.system_hint()))
+        if addressing.candidates:
+            planning_messages.append(planning_address_message)
     plan = await manager._chat_impl(
         planning_messages, model=None, role="planner", caller=caller + ":plan",
         session_id=session_id, allow_fallback=allow_fallback,
@@ -208,9 +209,7 @@ async def run_stages(manager, messages, *, model, role, caller, session_id,
         )
     rendering_messages = [m for m in messages if m.role == "system"]
     if addressing is not None:
-        rendering_messages = [replace(m, content=m.content.replace(initial_address_hint, addressing.system_hint()))
-                              for m in rendering_messages]
-        rendering_messages.append(Message(role="system", content=addressing.system_hint()))
+        rendering_messages.append(Message(role="system", content=addressing.rendering_hint()))
     if runner.reply_policy:
         old_hint, final_hint = policy.system_hint(), runner.reply_policy.system_hint()
         if any(old_hint in m.content for m in rendering_messages):

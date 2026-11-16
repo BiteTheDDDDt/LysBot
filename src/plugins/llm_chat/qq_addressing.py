@@ -39,6 +39,21 @@ class QQAddressing:
                 "引用用于承接原话，@用于叫到人，两者不等于正文的全部受众。"
                 "把任务交给某人时直接对他说；评论某人时可以说他。程序添加引用和@，正文无需拼QQ标签。")
 
+    def rendering_hint(self) -> str:
+        """Describe who hears the prose without passing QQ routing fields to chat."""
+        hint = "写群聊正文，从要说的话开始；系统会添加规划好的引用和 @。"
+        if self.audience:
+            names = {
+                row.user_id: row.names[0] for row in self.candidates if row.names and row.names[0]
+            }
+            audience = [names[user_id] for user_id in self.audience if user_id in names]
+            if audience:
+                hint += "已知收话人的称呼（资料）：" + json.dumps(audience, ensure_ascii=False) + "。"
+            hint += "直接对交接里指定的收话人说话。"
+        if self.mentions:
+            hint += "原生 @ 已由系统安排，正文省去开头的 @昵称，直接说要对方听的话。"
+        return hint
+
     def add_verified_member(self, user_id: int, *names: str) -> None:
         names = tuple(name for name in names if name)
         target = MessageTarget(None, user_id, names[0] if names else "群成员", names)

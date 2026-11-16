@@ -140,6 +140,7 @@ class AddressingTests(unittest.IsolatedAsyncioTestCase):
         from src.plugins.llm_chat.model_turn import run_stages
         address = self.address({"audience_user_ids": [101]})
         initial_hint = address.system_hint()
+        address.add_verified_member(202, "搭档")
         runner = agent_runner.AgentRunner("group_7", 60)
         runner.reply_policy = ReplyPolicy(addressing=address)
         runner.user_question = "你把任务交给他吧"
@@ -148,19 +149,24 @@ class AddressingTests(unittest.IsolatedAsyncioTestCase):
 
         async def call(messages, **kwargs):
             if kwargs["role"] == "planner":
+                self.assertIn(initial_hint, [m.content for m in messages])
                 address.revise({"audience_user_ids": [202], "mention_user_ids": [202]})
                 runner.response_mode = "social"
                 return models.ChatResponse("直接请202接任务")
             content = "\n".join(m.content for m in messages)
             self.assertNotIn(initial_hint, content)
-            self.assertIn(address.system_hint(), content)
+            self.assertIn("搭档", content)
+            self.assertIn("直接对交接里指定的收话人说话", content)
+            self.assertNotIn("mention_user_ids", content)
+            self.assertNotIn("reply_to_message_id", content)
             self.assertNotIn("以下是真实事件候选ID", content)
             return models.ChatResponse("这活交给你了")
 
         token = agent_runner.current_run.set(runner)
         try:
             result = await run_stages(SimpleNamespace(_chat_impl=call),
-                [models.Message("system", initial_hint)], model=None, role="chat", caller="test",
+                [models.Message("system", "人设"), models.Message("user", runner.user_question)],
+                model=None, role="chat", caller="test",
                 session_id="group_7", allow_fallback=False, required_tool=None, media_followup=True)
             self.assertEqual(address.text(str(result))[0].data["qq"], "202")
         finally:
