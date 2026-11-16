@@ -38,8 +38,8 @@ class AddressingTests(unittest.IsolatedAsyncioTestCase):
         address.revise({"mention_user_ids": [202]})
         sent = AsyncMock()
 
-        async def send(text, first):
-            await sent(address.text(text, first=first))
+        async def send(text, payload):
+            await sent(payload)
 
         turn = await send_response_turn(
             text="@团子，来讲个笑话 @另一个人", decision=PlannerDecision(addressing=address),
@@ -53,6 +53,27 @@ class AddressingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(address.strip_repeated_mentions("@团子哥 你好"), "@团子哥 你好")
         self.assertEqual(address.strip_repeated_mentions("@另一个昵称 你好"), "你好")
         self.assertEqual(self.address({}).strip_repeated_mentions("@团子 你好"), "@团子 你好")
+
+    async def test_inline_mention_keeps_position_and_falls_back_for_missing_marker(self):
+        from src.plugins.llm_chat.planner import PlannerDecision, ReplyPart
+        from src.plugins.llm_chat.turns import send_response_turn
+
+        address = self.address({"reply_to_message_id": 11})
+        address.add_verified_member(202, "团子")
+        address.revise({"mention_user_ids": [202, 303]})
+        send = AsyncMock()
+        result = await send_response_turn(
+            text="我们先定个分工。\n\n笑话就请⟦at1⟧讲，⟦at1⟧准备好了没⟦at999⟧",
+            decision=PlannerDecision(addressing=address, parts=[ReplyPart("text"), ReplyPart("text")]),
+            planned_meme=None, send_text=send, delay_range=(0, 0),
+        )
+        first, second = (call.args[1] for call in send.await_args_list)
+        self.assertEqual([(seg.type, seg.data.get("qq")) for seg in first],
+                         [("reply", None), ("at", "303"), ("text", None), ("text", None)])
+        self.assertEqual([(seg.type, seg.data.get("qq")) for seg in second],
+                         [("text", None), ("at", "202"), ("text", None), ("text", None), ("text", None)])
+        self.assertEqual(second.extract_plain_text(), "笑话就请讲，团子准备好了没")
+        self.assertEqual(result.text_for_memory, "我们先定个分工\n笑话就请@团子讲，团子准备好了没")
 
     def test_revision_inherits_omitted_fields_and_clears_explicit_empty_fields(self):
         address = self.address({"reply_to_message_id": 11, "mention_user_ids": [202]})
@@ -156,6 +177,7 @@ class AddressingTests(unittest.IsolatedAsyncioTestCase):
             content = "\n".join(m.content for m in messages)
             self.assertNotIn(initial_hint, content)
             self.assertIn("搭档", content)
+            self.assertIn("⟦at1⟧", content)
             self.assertIn("直接对交接里指定的收话人说话", content)
             self.assertNotIn("mention_user_ids", content)
             self.assertNotIn("reply_to_message_id", content)

@@ -544,10 +544,9 @@ class ProactiveManager:
                         # 清理回复内容
                         generated_response = response
                         response = clean_response(response or "")
-                        async def send_text_reply(text: str, is_first: bool) -> None:
+                        async def send_text_reply(text, payload) -> None:
                             ensure_send_allowed(group_id)
                             from .agent_runner import deliver_reply as _deliver_agent_reply
-                            payload = addressing.text(text, first=is_first)
                             await _deliver_agent_reply(generated_response, text, lambda: bot.send_group_msg(group_id=group_id, message=payload), bot=bot, group_id=group_id)
 
                         sent_turn = await send_response_turn(

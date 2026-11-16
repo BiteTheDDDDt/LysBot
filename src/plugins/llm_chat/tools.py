@@ -414,7 +414,8 @@ async def pick_meme(topic: str, reason: str = "") -> Optional[Dict[str, Any]]:
     return dict(planned)
 
 
-async def send_picked_meme(planned: Optional[Dict[str, Any]], allow_reply: bool = True) -> str:
+async def send_picked_meme(planned: Optional[Dict[str, Any]], allow_reply: bool = True,
+                           *, skip_mentions: frozenset[int] = frozenset()) -> str:
     """发送已预选的表情包。"""
     from .memes import meme_manager
 
@@ -450,7 +451,7 @@ async def send_picked_meme(planned: Optional[Dict[str, Any]], allow_reply: bool 
         ensure_send_allowed(group_id)
         send_result = await bot.send_group_msg(
             group_id=group_id,
-            message=addressing.prefix() + MessageSegment.image(raw),
+            message=addressing.prefix(skip_mentions=skip_mentions) + MessageSegment.image(raw),
         )
     except Exception as e:
         logger.error(f"[send_meme] 发送失败 id={meme_id}: {e}")

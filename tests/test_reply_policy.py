@@ -154,7 +154,7 @@ class ReplyContextTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertFalse(policy.detailed)
         self.assertEqual([call.args for call in send.await_args_list],
-                         [("第一条", True), ("第二条", False)])
+                         [("第一条", "第一条"), ("第二条", "第二条")])
         self.assertEqual(delivered.text_for_memory, "第一条\n第二条")
 
     async def test_ordinary_short_reply_does_not_split_on_newline(self):
@@ -163,7 +163,7 @@ class ReplyContextTests(unittest.IsolatedAsyncioTestCase):
             text="第一句\n第二句", decision=PlannerDecision(parts=[ReplyPart("text")]),
             planned_meme=None, send_text=send, delay_range=(0, 0),
         )
-        send.assert_awaited_once_with("第一句\n第二句", True)
+        send.assert_awaited_once_with("第一句\n第二句", "第一句\n第二句")
 
     async def test_context_pressure_preserves_question_after_long_quote(self):
         current = chat.ResolvedIncomingMessage(
@@ -353,7 +353,7 @@ class ReplyDeliveryTests(unittest.IsolatedAsyncioTestCase):
         sender = AsyncMock()
         turn = await send_response_turn(text="只接这一句。后面是模型多说的。", decision=None,
                                         planned_meme=None, send_text=sender)
-        sender.assert_awaited_once_with("只接这一句。后面是模型多说的", True)
+        sender.assert_awaited_once_with("只接这一句。后面是模型多说的", "只接这一句。后面是模型多说的")
         self.assertEqual(turn.text_for_memory, "只接这一句。后面是模型多说的")
 
     async def test_batch_uses_planner_mode_and_retains_paragraphs(self):

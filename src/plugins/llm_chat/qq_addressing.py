@@ -7,6 +7,9 @@ import unicodedata
 from nonebot.adapters.onebot.v11 import Message, MessageSegment
 
 
+MENTION_SLOT = re.compile(r"⟦at[0-9]+⟧")
+
+
 @dataclass(frozen=True)
 class MessageTarget:
     message_id: int | None
@@ -39,19 +42,29 @@ class QQAddressing:
                 "引用用于承接原话，@用于叫到人，两者不等于正文的全部受众。"
                 "把任务交给某人时直接对他说；评论某人时可以说他。程序添加引用和@，正文无需拼QQ标签。")
 
-    def rendering_hint(self) -> str:
+    def mention_slots(self) -> dict[str, int]:
+        return {f"⟦at{index}⟧": user_id for index, user_id in enumerate(self.mentions, 1)}
+
+    def _display_names(self) -> dict[int, str]:
+        return {row.user_id: row.names[0] for row in self.candidates if row.names and row.names[0]}
+
+    def rendering_hint(self, *, allow_inline: bool = True) -> str:
         """Describe who hears the prose without passing QQ routing fields to chat."""
         hint = "写群聊正文，从要说的话开始；系统会添加规划好的引用和 @。"
         if self.audience:
-            names = {
-                row.user_id: row.names[0] for row in self.candidates if row.names and row.names[0]
-            }
+            names = self._display_names()
             audience = [names[user_id] for user_id in self.audience if user_id in names]
             if audience:
                 hint += "已知收话人的称呼（资料）：" + json.dumps(audience, ensure_ascii=False) + "。"
             hint += "直接对交接里指定的收话人说话。"
-        if self.mentions:
-            hint += "原生 @ 已由系统安排，正文省去开头的 @昵称，直接说要对方听的话。"
+        if self.mentions and allow_inline:
+            names = self._display_names()
+            slots = {marker: names.get(user_id, f"第{index}位待通知的对象")
+                     for index, (marker, user_id) in enumerate(self.mention_slots().items(), 1)}
+            hint += ("下面的占位符对应规划好的原生 @。直接把占位符写在你想 @ 对方的位置，"
+                     "例如把‘让某人来讲’写成‘那就让⟦at1⟧来讲’。同一占位符用一次，省略时系统会在开头 @。"
+                     "保留占位符原样，无需另写 @昵称。可用占位符（资料）："
+                     + json.dumps(slots, ensure_ascii=False))
         return hint
 
     def add_verified_member(self, user_id: int, *names: str) -> None:
@@ -92,11 +105,13 @@ class QQAddressing:
         self.reply_to, self.mention = updated.reply_to, updated.mention
         self.additional_mentions, self.audience = updated.additional_mentions, updated.audience
 
-    def prefix(self) -> Message:
+    def prefix(self, *, skip_mentions: frozenset[int] = frozenset()) -> Message:
         message = Message()
         if self.reply_to is not None:
             message.append(MessageSegment.reply(self.reply_to))
         for user_id in self.mentions:
+            if user_id in skip_mentions:
+                continue
             message.append(MessageSegment.at(user_id))
             message.append(MessageSegment.text(" "))
         return message
@@ -106,6 +121,40 @@ class QQAddressing:
         if prefix or "[CQ:" in value:
             return prefix + MessageSegment.text(value)
         return value
+
+
+    def place_text(self, value: str, *, first: bool, reserved: frozenset[int],
+                   mentioned: set[int]) -> tuple[str, Message | str]:
+        """Resolve approved markers into QQ segments and keep readable text for memory."""
+        slots = self.mention_slots()
+        if not slots or not MENTION_SLOT.search(value):
+            prefix = self.prefix(skip_mentions=reserved) if first else Message()
+            return value, prefix + MessageSegment.text(value) if prefix or "[CQ:" in value else value
+
+        message = self.prefix(skip_mentions=reserved) if first else Message()
+        names = self._display_names()
+        plain = []
+        offset = 0
+        for match in MENTION_SLOT.finditer(value):
+            before = value[offset:match.start()]
+            if before:
+                message.append(MessageSegment.text(before))
+                plain.append(before)
+            user_id = slots.get(match[0])
+            if user_id is not None:
+                if user_id in mentioned:
+                    name = names.get(user_id, "对方")
+                    message.append(MessageSegment.text(name))
+                    plain.append(name)
+                else:
+                    message.append(MessageSegment.at(user_id))
+                    mentioned.add(user_id)
+                    plain.append("@" + names.get(user_id, str(user_id)))
+            offset = match.end()
+        if offset < len(value):
+            message.append(MessageSegment.text(value[offset:]))
+            plain.append(value[offset:])
+        return "".join(plain), message
 
 
 def select_addressing(payload: dict, candidates: list[MessageTarget], *, bot_self_id: str,

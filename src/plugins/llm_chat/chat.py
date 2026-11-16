@@ -1299,9 +1299,7 @@ async def _do_handle_single_chat(bot: Bot, event: MessageEvent, message: str,
         ):
             return
 
-        async def send_text_reply(text: str, is_first: bool) -> None:
-            addressing = planner_decision.addressing if group_id and planner_decision else QQAddressing()
-            payload = addressing.text(text, first=is_first)
+        async def send_text_reply(text: str, payload: Message | str) -> None:
             ensure_send_allowed(group_id)
             await _deliver_agent_reply(response_text,text,lambda:bot.send(event,payload), bot=bot, group_id=group_id)
 
@@ -1587,9 +1585,7 @@ async def _do_handle_merged_chat(
             return
 
         # 发送回复（使用 bot.send 而不是 finish，因为不是在 matcher 中）
-        async def send_text_reply(text: str, is_first: bool) -> None:
-            addressing = planner_decision.addressing if planner_decision else QQAddressing()
-            payload = addressing.text(text, first=is_first)
+        async def send_text_reply(text: str, payload: Message | str) -> None:
             ensure_send_allowed(group_id)
             await _deliver_agent_reply(response_text,text,lambda:bot.send(first_msg.event,payload), bot=bot, group_id=group_id)
 

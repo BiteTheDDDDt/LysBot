@@ -6,12 +6,15 @@ from dataclasses import dataclass, replace
 from typing import Awaitable, Callable, Optional
 
 from nonebot import logger
+from nonebot.adapters.onebot.v11 import Message
+
+from .qq_addressing import MENTION_SLOT, QQAddressing
 
 from .planner import PlannerDecision, ReplyPart
 from .reply_policy import ReplyPolicy, SHORT_REPLY, constrain_plan, enforce_reply_budget
 
 
-TextSender = Callable[[str, bool], Awaitable[None]]
+TextSender = Callable[[str, Message | str], Awaitable[None]]
 
 
 @dataclass
@@ -172,12 +175,18 @@ async def send_response_turn(
     planned_meme: Optional[dict],
     send_text: TextSender,
     delay_range: tuple[float, float] = (0.7, 2.0),
+    allow_addressing: bool = True,
     reply_policy: ReplyPolicy = SHORT_REPLY,
 ) -> SentTurn:
     """Send complete text in the planned order and record delivered content."""
     from .tools import send_picked_meme
 
     items = build_turn_items(text=text, decision=decision, planned_meme=planned_meme, reply_policy=reply_policy)
+    addressing = decision.addressing if decision and allow_addressing else QQAddressing()
+    slots = addressing.mention_slots()
+    reserved = frozenset(slots[marker] for kind, value in items if kind == "text"
+                         for marker in MENTION_SLOT.findall(str(value)) if marker in slots)
+    mentioned: set[int] = set()
     sent_texts: list[str] = []
     sent_meme: Optional[dict] = None
 
@@ -191,12 +200,16 @@ async def send_response_turn(
                 msg = str(payload or "").strip()
                 if not msg:
                     continue
-                await send_text(msg, is_first)
-                sent_texts.append(msg)
+                msg, outgoing = addressing.place_text(msg, first=is_first, reserved=reserved, mentioned=mentioned)
+                if outgoing:
+                    await send_text(msg, outgoing)
+                    sent_texts.append(msg)
                 continue
 
             if kind == "meme":
-                result = await send_picked_meme(payload if isinstance(payload, dict) else None, allow_reply=is_first)
+                meme = payload if isinstance(payload, dict) else None
+                result = await send_picked_meme(meme, allow_reply=is_first and allow_addressing,
+                                                skip_mentions=reserved)
                 logger.info(f"[turn] 发送表情包结果: {result[:100]}")
                 if getattr(result, "delivery_status", None) == "sent":
                     from .tools import get_last_sent_meme

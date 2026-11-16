@@ -86,7 +86,7 @@ class ReplyPresentationTests(unittest.IsolatedAsyncioTestCase):
             decision=PlannerDecision(parts=[ReplyPart('text')]), planned_meme=None,
             reply_policy=DETAILED_REPLY, send_text=send, delay_range=(0, 0))
         self.assertEqual(result.sent_texts, ['核心结论', '第一条依据。\n第二条依据'])
-        self.assertEqual([c.args[1] for c in send.await_args_list], [True, False])
+        self.assertEqual([c.args[1] for c in send.await_args_list], result.sent_texts)
         self.assertEqual(result.text_for_memory, '核心结论\n第一条依据。\n第二条依据')
 
     def test_code_block_is_not_split_into_multiple_messages(self):
@@ -119,4 +119,4 @@ class ReplyPresentationTests(unittest.IsolatedAsyncioTestCase):
                 decision=PlannerDecision(parts=[ReplyPart('text')]), planned_meme=None,
                 reply_policy=policy, send_text=send, delay_range=(0, 0))
             self.assertEqual(delivered.text_for_memory, original)
-            send.assert_awaited_once_with(original, True)
+            send.assert_awaited_once_with(original, original)

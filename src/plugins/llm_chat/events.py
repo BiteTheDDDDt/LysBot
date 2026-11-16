@@ -198,22 +198,21 @@ async def _handle_poke_chat(bot: Bot, user_id: int, group_id: int = None):
             voice_was_sent_this_round,
         )
         from .agent_runner import deliver_reply as _deliver_agent_reply
-        async def send_text(text, first):
+        async def send_text(text, payload):
             ensure_send_allowed(group_id)
             if group_id:
                 await _deliver_agent_reply(response_text, text, lambda: bot.send_group_msg(
-                    group_id=group_id, message=decision.addressing.text(
-                        text, first=first and not (image_was_sent_this_round() or voice_was_sent_this_round()),
-                    )
+                    group_id=group_id, message=payload,
                 ), bot=bot, group_id=group_id)
             else:
                 await _deliver_agent_reply(response_text, text, lambda: bot.send_private_msg(
-                    user_id=user_id, message=decision.addressing.text(text, first=False)
+                    user_id=user_id, message=payload,
                 ))
 
         sent_turn = await send_response_turn(
             text=cleaned_response, decision=decision, planned_meme=planned_meme,
             reply_policy=reply_policy, send_text=send_text,
+            allow_addressing=bool(group_id) and not (image_was_sent_this_round() or voice_was_sent_this_round()),
         )
         cleaned_response = sent_turn.text_for_memory
         history_text = cleaned_response

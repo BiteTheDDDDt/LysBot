@@ -209,7 +209,7 @@ async def run_stages(manager, messages, *, model, role, caller, session_id,
         )
     rendering_messages = [m for m in messages if m.role == "system"]
     if addressing is not None:
-        rendering_messages.append(Message(role="system", content=addressing.rendering_hint()))
+        rendering_messages.append(Message(role="system", content=addressing.rendering_hint(allow_inline=not runner.media_delivered)))
     if runner.reply_policy:
         old_hint, final_hint = policy.system_hint(), runner.reply_policy.system_hint()
         if any(old_hint in m.content for m in rendering_messages):
