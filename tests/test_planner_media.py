@@ -141,7 +141,7 @@ class PlannerMediaTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("可选 action：reply | close | silent | wait", prompt)
         self.assertIn("不按三轮机械收尾", prompt)
         self.assertIn('"parts"', prompt)
-        self.assertIn("表情包是 reply 的一种可见输出", prompt)
+        self.assertNotIn("meme", prompt)
         self.assertNotIn('"response_shape"', prompt)
 
     def test_close_action_produces_one_terminal_text_reply(self):

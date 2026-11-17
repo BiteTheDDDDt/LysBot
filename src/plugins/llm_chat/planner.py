@@ -533,6 +533,14 @@ async def plan_chat_action(
         "voice": not idle and role_available("tts"),
         "image": not idle and role_available("image_gen"),
     }
+    reaction_policy = meme_topics = ""
+    part_example = '{"type":"text|image|voice"}'
+    if group_id:
+        part_example = '{"type":"text|meme|image|voice","topic":"仅 meme 时填写"}'
+        meme_topics = f"\nmeme 可用类别：{'、'.join(sorted(ALLOWED_TOPICS))}"
+        reaction_policy = """
+已经决定接话时，接梗、震惊、无语、自嘲或庆祝，优先用一张贴切的反应图。只发表情也是完整回复，例如 parts=[{"type":"meme","topic":"shock"}]。
+文字和表情各有作用时，按自然顺序一起安排。"""
     if idle:
         policy = """这是长时间无人发言后的定时机会。看最近互动决定保持安静，还是分享一张独立网络梗图。
 如果最近在认真讨论、有人不欢迎 bot 或此时插话不合适，选择 silent。轻松氛围下可以 reply。
@@ -546,7 +554,7 @@ reply 只允许一张 meme，不加字，不回复旧消息，不 @。topic 可�
 wait 用于对方明显还没说完，系统会重新读取最近对话。close 用于最后一句自然收束；已收尾或无可接内容用 silent。继续与否看话题和互动，不按三轮机械收尾。
 poke 是独立动作。结合语境选目标，主动模式只用 sender；被戳也可以接话、发表情或沉默。
 reason 说明是否值得接话。reply_hint 交接主动发言或戳一戳的接话点。任务对象、能力判断和具体答法由执行 planner 根据原话处理。
-parts 是暂定的可见输出，最多两项。默认一个 text。表情包是 reply 的一种可见输出，接梗或情绪反应可以只用 meme，需要时按顺序配一句话。
+parts 是暂定的可见输出，最多两项。需要回答问题或补充具体信息时用 text。{reaction_policy}
 需要图或声音才用 image/voice，放第一项，之后可暂定一条文字；能力询问、引用中的请求或讨论既有媒体仍用 text。
 语音意图：{VOICE_INTENT_POLICY}
 {REPLY_MODE_GUIDANCE}
@@ -554,7 +562,7 @@ parts 是暂定的可见输出，最多两项。默认一个 text。表情包是
 {PROACTIVE_VALUE_POLICY if proactive else ""}
 {followup_context}"""
         if proactive:
-            policy += "\n普通主动回复需填写 proactive_value 和 proactive_contribution，具体接梗或贴切反应也算参与价值。"
+            policy += "\n普通主动回复需填写 proactive_value 和 proactive_contribution。一张贴切的反应图可以用 social_reaction，写清它接住哪个梗或情绪。"
         if "repeat" in actions:
             policy += ("\n检测到相同文本形成队形。适合加入时选 repeat，系统原样发送候选，不写正文；"
                        "正常提问、抱怨、催促、刷屏或对别人的定向消息选择其他动作。"
@@ -562,9 +570,8 @@ parts 是暂定的可见输出，最多两项。默认一个 text。表情包是
 
     prompt = f"""你是 QQ 群聊的参与规划器。先选择动作，再提供必要的交接信息。只输出一个 JSON 对象。
 可选 action：{' | '.join(actions)}
-{policy}
-meme 可用类别：{'、'.join(sorted(ALLOWED_TOPICS))}
-未配置的媒体用文字说明。可用媒体：{', '.join(name for name, available in allowed_media.items() if available) or '无'}
+{policy}{meme_topics}
+已配置的生成工具：{', '.join(name for name, available in allowed_media.items() if available) or '无'}。需要调用未配置的生成工具时用文字说明。
 wait_seconds 上限：{config.planner_wait_max_seconds}
 格式：
 {{
@@ -572,7 +579,7 @@ wait_seconds 上限：{config.planner_wait_max_seconds}
   "reason": "为何参与或旁听",
   "reply_hint": "请求、对象和待解问题，可空",
   "reply_mode": "tiny|sentence|detailed",
-  "parts": [{{"type":"text|meme|image|voice","topic":"仅 meme 时填写"}}],
+  "parts": [{part_example}],
   "topic_state": "active|closing|exhausted",
   "wait_seconds": 0,
   "poke_target_id": "QQ号或 sender，仅 poke",
