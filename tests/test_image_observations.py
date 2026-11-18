@@ -28,12 +28,17 @@ class ImageObservationTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("一只猫", clean)
         self.assertEqual(unsolicited_view("请根据图片内容回复"), "请根据图片内容回复")
 
-    def test_proactive_planner_hides_observation_but_direct_planner_retains_it(self):
+    def test_proactive_planner_keeps_nearby_image_as_background(self):
         source = models.Message("user", "[甲] 图片1: 红色跑车\n\n请根据图片内容回复")
-        hidden = planner._format_planner_history([source], current_message="其他消息", max_chars=2000,
-                                                 hide_image_observations=True)
+        nearby = planner._format_planner_history([source], current_message="这车真快", max_chars=2000,
+                                                  hide_image_observations=True)
+        older = planner._format_planner_history([source] + [models.Message("user", "聊别的")] * 4,
+                                                current_message="其他消息", max_chars=2000,
+                                                hide_image_observations=True)
         direct = planner._format_planner_history([source], current_message="这车是什么", max_chars=2000)
-        self.assertNotIn("红色跑车", hidden)
+        self.assertIn("自动识别背景：红色跑车", nearby)
+        self.assertNotIn("请根据图片内容回复", nearby)
+        self.assertNotIn("红色跑车", older)
         self.assertIn("红色跑车", direct)
         self.assertIn("红色跑车", source.content)  # No mutation of stored history.
 

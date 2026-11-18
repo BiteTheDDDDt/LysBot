@@ -216,13 +216,12 @@ async def run_stages(manager, messages, *, model, role, caller, session_id,
             rendering_messages = [replace(m, content=m.content.replace(old_hint, final_hint)) for m in rendering_messages]
         else:
             rendering_messages.append(Message(role="system", content=final_hint))
-    # Factual context has already been interpreted/checked by the planner.
-    # Replaying guesses or earlier wrong answers invites the renderer to
-    # reinterpret them as evidence. Banter still needs conversational cues.
-    if runner.response_mode == "social":
+    if runner.response_mode in {"social", "mixed"}:
+        from .image_observations import unsolicited_view
+
         recent = [m for m in messages if m.role in {"user", "assistant"} and not m.is_summary and not m.is_reference and not m.is_thinking][-6:]
-        rendering_messages.append(Message(role="user", content="最近对话，仅供接话和理解指代：\n" +
-            "\n".join(f"{m.role}: {m.content[:400]}" for m in recent)))
+        rendering_messages.append(Message(role="user", content="最近对话，用于理解指代、语气和梗；事实依据见本轮交接。\n" +
+            "\n".join(f"{m.role}: {unsolicited_view(m.content)[:400]}" for m in recent)))
     rendering_messages.extend([
         Message(role="system", content=RENDERING_STYLE),
         Message(role="user", content="用户本轮问题：" + runner.user_question),

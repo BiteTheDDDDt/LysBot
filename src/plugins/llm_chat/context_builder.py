@@ -102,9 +102,9 @@ async def build_context_messages(
     references = [("最近群聊", recent_context), ("规划思考", think_context)]
     if planner_decision:
         # Preserve intent while distinguishing participation reasoning from evidence.
-        references.append(("参与规划理由（解释为何接话，不是事实依据）", planner_decision.reason))
+        references.append(("为何接话（只用于定位语境，答法从原对话判断）", planner_decision.reason))
         if not group_id or reply_policy.scene in {"proactive", "poke"}:
-            references.append(("规划器的内容建议（待核对）", planner_decision.reply_hint))
+            references.append(("参与规划提供的对象和上下文线索", planner_decision.reply_hint))
     for label, content in references:
         if content:
             messages.append(LLMMessage(

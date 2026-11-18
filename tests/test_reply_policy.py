@@ -208,7 +208,7 @@ class ReplyContextTests(unittest.IsolatedAsyncioTestCase):
             rationale = next(m for m in messages if "历史请求详细解释" in m.content)
             self.assertEqual(rationale.role, "user")
             self.assertTrue(rationale.is_reference)
-            self.assertIn("解释为何接话，不是事实依据", rationale.content)
+            self.assertIn("只用于定位语境，答法从原对话判断", rationale.content)
             self.assertIn("500个字符" if policy.detailed else "一两句自然短话", system)
             self.assertNotIn("20个" if policy.detailed else "500个", system)
             self.assertEqual(sum(m.role == "system" for m in messages), 1)

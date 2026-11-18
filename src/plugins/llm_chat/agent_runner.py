@@ -387,7 +387,7 @@ class AgentRunner:
         if closing_research:
             messages.append({"role": "user", "content": (
                 "本轮检索预算已结束，不再开启检索或发进展。现在用已获得的结果完成规划并交回答复；"
-                "保留来源、必要条件和未确认项，有足够事实时提供可直接发送的 answer_draft。"
+                "先交接能回答的发现和来源。缺口会改变答案时，用一句话指出具体缺什么。"
             )})
         if self.api_errors:
             messages.append({"role": "user", "content": "本轮 API 故障记录，仅作执行状态，不是事实证据。"
@@ -396,8 +396,7 @@ class AgentRunner:
         if search_active:
             messages.append({
                 "role": "user",
-                "content": "检索核验提示：提取记忆、摘要、机器人回复及其转述都只是线索。"
-                "群内外号对应核对用户原文，不能把猜测说成事实；当前群主、管理员和群名片以 QQ 实时结果为准。"
+                "content": "检索进度："
                 f"本轮已执行 {self.tool_calls} 次工具，剩余约 {int(self.remaining())} 秒；下一跳应解决明确缺口，可批量查独立候选。",
             })
         if self.no_new_evidence_calls >= 3:
@@ -405,7 +404,7 @@ class AgentRunner:
                 {
                     "role": "user",
                     "content": f"检索预算提示：连续 {self.no_new_evidence_calls} 次读取没有新增证据，已调用 {self.tool_calls}/{config.agent_max_tool_calls} 次。"
-                    "请判断是否已有明确的新线索值得继续；否则用现有证据收尾，指出尚不能确认的部分。",
+                    "有具体新线索就继续；否则用已找到的材料完成本轮。",
                 }
             )
         # Remove complete old tool groups, never partial JSON or unpaired calls.

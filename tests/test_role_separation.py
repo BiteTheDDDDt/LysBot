@@ -39,7 +39,7 @@ class RoleSeparationTests(unittest.IsolatedAsyncioTestCase):
                         ], role="chat")
                     handoff = chat.chat.await_args.args[0][-1].content
                     self.assertIn(note, handoff)
-                    self.assertIn("提取直接回应用户的内容", handoff)
+                    self.assertIn("content 和 answer_draft 提供回复素材", handoff)
                     self.assertIn("普通玩笑直接接话", handoff)
                     self.assertNotIn("本轮必须保留的要求", handoff)
                     self.assertEqual(result.agent_run.planning_result, note)
@@ -134,7 +134,7 @@ class RoleSeparationTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(manager, "_chat_impl", side_effect=call):
             await manager.run_turn(messages)
 
-    async def test_factual_and_mixed_renderers_receive_handoff_without_raw_history(self):
+    async def test_mixed_renderer_keeps_dialogue_with_a_separate_factual_handoff(self):
         from src.plugins.llm_chat.agent_runner import current_run
         for mode in ("factual", "mixed"):
             with self.subTest(mode=mode):
@@ -163,11 +163,17 @@ class RoleSeparationTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(captured["planner"][:-1], messages)
                 rendered = captured["chat"]
                 user_inputs = [m.content for m in rendered if m.role == "user"]
-                self.assertEqual(user_inputs, ["用户本轮问题：" + question])
+                self.assertEqual(user_inputs[-1], "用户本轮问题：" + question)
+                if mode == "mixed":
+                    self.assertEqual(len(user_inputs), 2)
+                    self.assertIn("群友猜测已经普遍涨价", user_inputs[0])
+                    self.assertIn("事实依据见本轮交接", user_inputs[0])
+                else:
+                    self.assertEqual(len(user_inputs), 1)
                 self.assertEqual(rendered[0].content, "保留原人设")
                 payload = json.loads(rendered[-1].content.splitlines()[2])
                 self.assertEqual(payload["answer_draft"], draft)
-                self.assertNotIn("之前错误断言", "\n".join(m.content for m in rendered))
+                self.assertNotIn("之前错误断言", rendered[-1].content)
                 self.assertEqual(str(result), draft)
 
     async def test_execution_plan_can_shorten_selected_detail_with_one_hint(self):

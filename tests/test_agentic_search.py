@@ -913,7 +913,7 @@ class RunnerContractTests(unittest.IsolatedAsyncioTestCase):
         # policy cannot confuse it with a transient upstream timeout.
         self.assertEqual(run.step_metrics[-1]["status"], "StepTimeout")
 
-    async def test_search_grounding_notice_and_timeout_do_not_affect_initial_or_media_step(self):
+    async def test_search_progress_notice_and_timeout_do_not_affect_initial_or_media_step(self):
         from types import SimpleNamespace
 
         for tool in (None, "generate_image", "query_history"):
@@ -925,10 +925,10 @@ class RunnerContractTests(unittest.IsolatedAsyncioTestCase):
             sent = backend._create_completion.await_args.args[1]
             if tool == "query_history":
                 self.assertLessEqual(sent["timeout"], models.config.agent_search_step_timeout)
-                self.assertIn("不能把猜测说成事实", sent["messages"][-1]["content"])
+                self.assertIn("检索进度", sent["messages"][-1]["content"])
             else:
                 self.assertEqual(sent["timeout"], models.config.llm_request_timeout)
-                self.assertNotIn("检索核验提示", json.dumps(sent["messages"], ensure_ascii=False))
+                self.assertNotIn("检索进度", json.dumps(sent["messages"], ensure_ascii=False))
             self.assertEqual(run.step_metrics[-1]["status"], "ok")
 
     async def test_reasoning_only_completion_is_never_sent_as_the_answer(self):

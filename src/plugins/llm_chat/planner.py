@@ -135,7 +135,7 @@ class PlannerDecision:
         if self.action == "close":
             hints.append(
                 "本轮是话题收束：只说一句自然、简短的结束语，不提出新问题，"
-                "不继续抬杠，不留下必须让对方接话的钩子。"
+                "说完即可结束这轮。"
             )
         if self.required_tool:
             hints.append(
@@ -236,9 +236,12 @@ def _format_planner_history(
     budget = max(200, int(max_chars or 6000))
     newest_first: list[str] = []
     used = 0
-    for message in reversed(visible):
+    for offset, message in enumerate(reversed(visible)):
         from .image_observations import unsolicited_view
-        content = _one_line(unsolicited_view(message.content) if hide_image_observations else message.content)
+        content = message.content
+        if hide_image_observations:
+            content = unsolicited_view(content, include_observation=offset < 4 and message.role == "user")
+        content = _one_line(content)
         if not content:
             continue
         # One oversized message should not crowd out the entire dialogue.
@@ -553,7 +556,7 @@ reply 只允许一张 meme，不加字，不回复旧消息，不 @。topic 可�
 在“给 @某人做某事”中，某人是任务受众，仍应处理明确交给 bot 的任务。
 wait 用于对方明显还没说完，系统会重新读取最近对话。close 用于最后一句自然收束；已收尾或无可接内容用 silent。继续与否看话题和互动，不按三轮机械收尾。
 poke 是独立动作。结合语境选目标，主动模式只用 sender；被戳也可以接话、发表情或沉默。
-reason 说明是否值得接话。reply_hint 交接主动发言或戳一戳的接话点。任务对象、能力判断和具体答法由执行 planner 根据原话处理。
+reason 记录哪句原话或互动让这个动作合适。收到语气反馈时先理解对方想怎样聊；有具体误解、冒犯或失误时才需要回应那件事。reply_hint 可补充指代和接话线索，具体答法留给执行 planner。
 parts 是暂定的可见输出，最多两项。需要回答问题或补充具体信息时用 text。{reaction_policy}
 需要图或声音才用 image/voice，放第一项，之后可暂定一条文字；能力询问、引用中的请求或讨论既有媒体仍用 text。
 语音意图：{VOICE_INTENT_POLICY}
@@ -561,8 +564,6 @@ parts 是暂定的可见输出，最多两项。需要回答问题或补充具�
 {UNSOLICITED_IMAGE_POLICY if proactive or not is_direct else ""}
 {PROACTIVE_VALUE_POLICY if proactive else ""}
 {followup_context}"""
-        if proactive:
-            policy += "\n普通主动回复需填写 proactive_value 和 proactive_contribution。一张贴切的反应图可以用 social_reaction，写清它接住哪个梗或情绪。"
         if "repeat" in actions:
             policy += ("\n检测到相同文本形成队形。适合加入时选 repeat，系统原样发送候选，不写正文；"
                        "正常提问、抱怨、催促、刷屏或对别人的定向消息选择其他动作。"
@@ -576,17 +577,15 @@ wait_seconds 上限：{config.planner_wait_max_seconds}
 格式：
 {{
   "action": "选择一个可用动作",
-  "reason": "为何参与或旁听",
-  "reply_hint": "请求、对象和待解问题，可空",
+  "reason": "触发参与或旁听的具体语境",
+  "reply_hint": "待解指代、对象或上下文线索，可空",
   "reply_mode": "tiny|sentence|detailed",
   "parts": [{part_example}],
   "topic_state": "active|closing|exhausted",
   "wait_seconds": 0,
   "poke_target_id": "QQ号或 sender，仅 poke",
   "followup_target": "bot|other|unclear，仅隐式延续",
-  "followup_evidence": "隐式延续与 bot 上条消息的对应关系",
-  "proactive_value": "none|social_reaction|new_angle|useful_info|support，仅普通主动回复",
-  "proactive_contribution": "普通主动回复的具体接话点"
+  "followup_evidence": "隐式延续与 bot 上条消息的对应关系"
 }}
 silent、wait、repeat 的 parts 为 []，close 只用一个 text，poke 可只戳或配合 parts。
 当前模式: {mode}，触发类型: {trigger_kind}
@@ -647,12 +646,6 @@ QQ表情: {'，'.join(faces or []) or '无'}
             target = payload.get("followup_target") if isinstance(payload, dict) else None
             if target != "bot" or not isinstance(evidence, str) or not evidence.strip():
                 decision = PlannerDecision(action="silent", reason="未确认当前消息在回应 bot 的具体发言", parts=[])
-        if proactive and decision.should_continue and decision.action != "repeat":
-            contribution = _coerce_str(payload, "proactive_contribution")
-            if payload.get("proactive_value") not in {"social_reaction", "new_angle", "useful_info", "support"} or not contribution:
-                decision = PlannerDecision(action="silent", reason="主动发言缺少具体新贡献，保持旁听", parts=[])
-            else:
-                decision.reply_hint = f"{decision.reply_hint}\n本轮新增内容：{contribution}".strip()
         unavailable = [part.type for part in decision.parts if part.type in allowed_media and not allowed_media[part.type]]
         if unavailable:
             decision.parts = [ReplyPart("text")]

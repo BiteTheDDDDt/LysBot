@@ -20,21 +20,15 @@ class ProactiveValueTests(unittest.IsolatedAsyncioTestCase):
             return await planner.plan_chat_action(session_id="group_7", group_id=7,
                 current_message=message, mode=mode, is_direct=mode != "proactive", **kwargs)
 
-    async def test_empty_or_echo_contribution_blocks_text_and_media(self):
-        for fields in [{}, {"proactive_value": "none", "proactive_contribution": "这票价真狠"},
-                       {"proactive_value": "new_angle", "proactive_contribution": ""}]:
-            decision = await self.plan({"action": "reply", "parts": [{"type": "text"}], **fields})
-            self.assertEqual(decision.action, "silent")
-            self.assertEqual(decision.parts, [])
-        decision = await self.plan({"action": "reply", "parts": [{"type": "image"}]}, message="生成一张图片")
-        self.assertEqual(decision.action, "silent")
-
-    async def test_concrete_contribution_is_carried_and_direct_requests_unaffected(self):
-        for kind in ["social_reaction", "new_angle", "useful_info", "support"]:
-            decision = await self.plan({"action": "reply", "proactive_value": kind,
-                                        "proactive_contribution": "具体补充", "parts": [{"type": "text"}]})
+    async def test_proactive_reaction_does_not_require_a_separate_contribution(self):
+        for part in [{"type": "text"}, {"type": "meme", "topic": "shock"}]:
+            decision = await self.plan({"action": "reply", "reason": "群友在吐槽票价", "parts": [part]})
             self.assertEqual(decision.action, "reply")
-            self.assertIn("具体补充", decision.reply_hint)
+            self.assertEqual(decision.parts[0].type, part["type"])
+            self.assertEqual(decision.reason, "群友在吐槽票价")
+            self.assertEqual(decision.reply_hint, "")
+
+    async def test_direct_requests_and_wait_unaffected(self):
         self.assertEqual((await self.plan({"action": "reply"}, mode="passive")).action, "reply")
         self.assertEqual((await self.plan({"action": "wait"})).action, "wait")
 
