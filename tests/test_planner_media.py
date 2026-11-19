@@ -34,7 +34,7 @@ class PlannerMediaTests(unittest.IsolatedAsyncioTestCase):
 
         current = MessageTarget(51, 101, "这是什么？")
         previous = MessageTarget(49, 202, "上一个问题")
-        model = AsyncMock(return_value='{"action":"reply","reply_to_message_id":"49","mention_user_id":101}')
+        model = AsyncMock(return_value='{"action":"reply","reply_to_message_id":"49","mention_user_id":101,"reply_hint":["49",49,999,"问他为什么"]}')
         with (
             patch.object(planner, "_resolve_planner_context", AsyncMock(return_value="")),
             patch.object(planner.model_manager, "chat", model),
@@ -44,15 +44,18 @@ class PlannerMediaTests(unittest.IsolatedAsyncioTestCase):
                 session_id="group_7", group_id=7, current_message=current.text, current_targets=(current,),
             )
             self.assertEqual(decision.addressing, QQAddressing(reply_to=49, mention=101))
+            self.assertEqual(decision.reply_hint, (previous,))
             self.assertEqual([s.type for s in decision.addressing.text("接上一条")], ["reply", "at", "text", "text"])
             self.assertEqual(decision.addressing.text("补一句", first=False), "补一句")
             decision = await planner.plan_chat_action(session_id="group_8", group_id=8, current_message="继续")
             self.assertEqual(decision.addressing, QQAddressing())
-            model.return_value = '{"action":"reply","reply_to_message_id":51,"mention_user_id":101}'
+            self.assertEqual(decision.reply_hint, ())
+            model.return_value = '{"action":"reply","reply_to_message_id":51,"mention_user_id":101,"reply_hint":"问他为什么"}'
             decision = await planner.plan_chat_action(
                 session_id="group_7", group_id=7, current_message=current.text, current_targets=(current,),
             )
             self.assertEqual(decision.addressing, QQAddressing(reply_to=51))
+            self.assertEqual(decision.reply_hint, ())
             self.assertEqual([s.type for s in QQAddressing().text("[CQ:at,qq=all]")], ["text"])
 
     async def test_message_wording_does_not_override_planner_output(self):

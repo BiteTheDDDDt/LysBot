@@ -1,8 +1,10 @@
 """Shared LLM context assembly for passive and proactive chat flows."""
+import json
 from typing import Any, Dict, List, Optional
 from dataclasses import replace
 
 from .config import PERSONA_PROMPT, config
+from .conversation_style import GROUP_CHAT_STYLE
 from .memory import memory_manager
 from .model_types import Message as LLMMessage
 from .planner import PlannerDecision
@@ -77,6 +79,8 @@ async def build_context_messages(
 ) -> List[LLMMessage]:
     """Build the full message list used by chat generation."""
     system_parts = [reply_policy.system_hint(), PERSONA_PROMPT.strip()]
+    if group_id:
+        system_parts.append(GROUP_CHAT_STYLE)
 
     if extra_system:
         system_parts.append(extra_system.strip())
@@ -103,8 +107,11 @@ async def build_context_messages(
     if planner_decision:
         # Preserve intent while distinguishing participation reasoning from evidence.
         references.append(("为何接话（只用于定位语境，答法从原对话判断）", planner_decision.reason))
-        if not group_id or reply_policy.scene in {"proactive", "poke"}:
-            references.append(("参与规划提供的对象和上下文线索", planner_decision.reply_hint))
+        if planner_decision.reply_hint:
+            references.append(("参与规划选出的相关群聊原话", json.dumps([
+                {"作者": row.names[0] if row.names else row.user_id, "原话": row.text[:180]}
+                for row in planner_decision.reply_hint
+            ], ensure_ascii=False)))
     for label, content in references:
         if content:
             messages.append(LLMMessage(

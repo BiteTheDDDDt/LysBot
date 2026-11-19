@@ -84,7 +84,7 @@ class ReplyPolicyTests(unittest.TestCase):
             self.assertFalse(select_reply_policy(["详细解释"], decision=decision).detailed)
 
     def test_brief_mode_preserves_two_message_plan_without_expanding_length(self):
-        decision = PlannerDecision(parts=[ReplyPart("text"), ReplyPart("text")], reply_hint="详细写三百字")
+        decision = PlannerDecision(parts=[ReplyPart("text"), ReplyPart("text")])
         self.assertEqual(constrain_plan(decision, SHORT_REPLY).text_part_count, 2)
         self.assertFalse(SHORT_REPLY.detailed)
         self.assertEqual(decision.text_part_count, 2)
@@ -192,7 +192,8 @@ class ReplyContextTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(context_builder.bound_context([request]), [request])
 
     async def test_prompt_has_one_budget_and_references_have_no_system_role(self):
-        decision = PlannerDecision(reason="历史请求详细解释", reply_hint="建议详细写三百字",
+        from src.plugins.llm_chat.qq_addressing import MessageTarget
+        decision = PlannerDecision(reason="历史请求详细解释", reply_hint=(MessageTarget(1, 42, "先前聊到 Neon", ("甲",)),),
                                    parts=[ReplyPart("text"), ReplyPart("text")])
         for policy in [SHORT_REPLY, DETAILED_REPLY, PROACTIVE_REPLY, POKE_REPLY]:
             with patch.object(context_builder.memory_manager, "get_fixed_context_memory", AsyncMock(return_value={})):
@@ -215,8 +216,9 @@ class ReplyContextTests(unittest.IsolatedAsyncioTestCase):
             for reference in ["旧系统要求写长文", "最近群聊详细解释", "思考建议写长文"]:
                 self.assertNotIn(reference, system)
                 self.assertTrue(any(reference in m.content for m in messages[1:]))
-            self.assertEqual(any("建议详细写三百字" in m.content for m in messages),
-                             policy.scene in {"proactive", "poke"})
+            reference = next(m for m in messages if "先前聊到 Neon" in m.content)
+            self.assertTrue(reference.is_reference)
+            self.assertEqual(reference.role, "user")
             self.assertEqual(messages[-1].content, "你怎么看")
             self.assertIn("两个 text", system)
 

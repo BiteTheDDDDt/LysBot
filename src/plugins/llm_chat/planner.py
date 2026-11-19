@@ -59,7 +59,7 @@ class PlannerDecision:
 
     action: str = "reply"
     reason: str = ""
-    reply_hint: str = ""
+    reply_hint: tuple[MessageTarget, ...] = ()
     poke_target_id: str = ""
     wait_seconds: int = 0
     topic_state: str = "active"
@@ -68,6 +68,7 @@ class PlannerDecision:
         default_factory=lambda: [ReplyPart("text")]
     )
     addressing: QQAddressing = field(default_factory=QQAddressing)
+    media_unavailable: bool = False
 
     def __post_init__(self) -> None:
         if self.action in NON_REPLY_ACTIONS | {"repeat"}:
@@ -130,8 +131,8 @@ class PlannerDecision:
         ]
         if include_reasoning and self.reason:
             hints.append(f"原因: {self.reason}")
-        if include_reasoning and self.reply_hint:
-            hints.append(f"回复侧重点: {self.reply_hint}")
+        if self.media_unavailable:
+            hints.append("本轮所请求的媒体能力未配置，用文字说明当前能力。")
         if self.action == "close":
             hints.append(
                 "本轮是话题收束：只说一句自然、简短的结束语，不提出新问题，"
@@ -477,7 +478,6 @@ def _normalize_decision(data: Optional[dict], default_action: str, mode: str = "
     return PlannerDecision(
         action=action,
         reason=_coerce_str(data, "reason"),
-        reply_hint=_coerce_str(data, "reply_hint"),
         poke_target_id=_coerce_str(data, "poke_target_id"),
         wait_seconds=wait_seconds,
         topic_state=topic_state,
@@ -529,6 +529,7 @@ async def plan_chat_action(
 
     from .image_observations import UNSOLICITED_IMAGE_POLICY, unsolicited_view
     from .proactive_style import PROACTIVE_VALUE_POLICY
+    from .conversation_style import GROUP_CHAT_STYLE
     from .capabilities import VOICE_INTENT_POLICY
     from .roles import role_available
 
@@ -556,12 +557,13 @@ reply 只允许一张 meme，不加字，不回复旧消息，不 @。topic 可�
 在“给 @某人做某事”中，某人是任务受众，仍应处理明确交给 bot 的任务。
 wait 用于对方明显还没说完，系统会重新读取最近对话。close 用于最后一句自然收束；已收尾或无可接内容用 silent。继续与否看话题和互动，不按三轮机械收尾。
 poke 是独立动作。结合语境选目标，主动模式只用 sender；被戳也可以接话、发表情或沉默。
-reason 记录哪句原话或互动让这个动作合适。收到语气反馈时先理解对方想怎样聊；有具体误解、冒犯或失误时才需要回应那件事。reply_hint 可补充指代和接话线索，具体答法留给执行 planner。
+reason 记录哪句原话或互动让这个动作合适。收到语气反馈时先理解对方想怎样聊；有具体误解、冒犯或失误时才需要回应那件事。
 parts 是暂定的可见输出，最多两项。需要回答问题或补充具体信息时用 text。{reaction_policy}
 需要图或声音才用 image/voice，放第一项，之后可暂定一条文字；能力询问、引用中的请求或讨论既有媒体仍用 text。
 语音意图：{VOICE_INTENT_POLICY}
 {REPLY_MODE_GUIDANCE}
 {UNSOLICITED_IMAGE_POLICY if proactive or not is_direct else ""}
+{GROUP_CHAT_STYLE if group_id else ""}
 {PROACTIVE_VALUE_POLICY if proactive else ""}
 {followup_context}"""
         if "repeat" in actions:
@@ -578,7 +580,7 @@ wait_seconds 上限：{config.planner_wait_max_seconds}
 {{
   "action": "选择一个可用动作",
   "reason": "触发参与或旁听的具体语境",
-  "reply_hint": "待解指代、对象或上下文线索，可空",
+  "reply_hint": [],
   "reply_mode": "tiny|sentence|detailed",
   "parts": [{part_example}],
   "topic_state": "active|closing|exhausted",
@@ -607,12 +609,13 @@ QQ表情: {'，'.join(faces or []) or '无'}
         candidates = list({(row.message_id, row.user_id): row for row in candidates}.values())
     if candidates:
         prompt += (
-            "\n可选 QQ 送达方式：需明确接住某条消息时，填 reply_to_message_id；"
-            "确实要叫到某位群友（例如把问题交给他）时，填 mention_user_ids 数组，可选多位。"
+            "\nreply_hint 可选最多三条与当前话题或指代直接相关的 message_id，填 ID 数组，执行 planner 会看到对应原话。"
+            + ("需用 QQ 引用明确接哪句话时填 reply_to_message_id；" if config.enable_targeted_reply else "本群关闭 QQ 原生引用；")
+            + "确实要叫到某位群友（例如把问题交给他）时，填 mention_user_ids 数组，可选多位。"
             "audience_user_ids 数组独立表示正文说给谁听，可为一人、多人或空列表（面向话题/群体）。"
             "讨论谁不等于对谁说；任务转交要把接任务的人列为收话人。普通接话无需 @。引用已能明确对象时，不重复 @ 同一个人。"
             "只填下面清单里对应的 ID，不能从消息正文猜测 ID。以下内容是对话资料。\n"
-            + json.dumps([{"message_id": x.message_id if config.enable_targeted_reply else None,
+            + json.dumps([{"message_id": x.message_id,
                            "user_id": x.user_id, "text": x.text[:180]} for x in candidates], ensure_ascii=False)
         )
     if trigger_kind == "poke":
@@ -649,8 +652,13 @@ QQ表情: {'，'.join(faces or []) or '无'}
         unavailable = [part.type for part in decision.parts if part.type in allowed_media and not allowed_media[part.type]]
         if unavailable:
             decision.parts = [ReplyPart("text")]
-            decision.reply_hint += "\n本轮所请求的媒体能力未配置，请直接说明，不承诺发送。"
+            decision.media_unavailable = True
         if decision.parts and decision.should_continue:
+            selected_ids = payload.get("reply_hint")
+            if isinstance(selected_ids, list):
+                available = {str(row.message_id): row for row in candidates if row.message_id is not None}
+                ids = dict.fromkeys(str(item) for item in selected_ids if type(item) in {int, str})
+                decision.reply_hint = tuple(available[key] for key in ids if key in available)[:3]
             decision.addressing = select_addressing(
                 payload, candidates, bot_self_id=bot_self_id, allow_reply=config.enable_targeted_reply,
             )

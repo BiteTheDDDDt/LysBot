@@ -57,6 +57,8 @@ class QQAddressing:
             if audience:
                 hint += "已知收话人的称呼（资料）：" + json.dumps(audience, ensure_ascii=False) + "。"
             hint += "直接对交接里指定的收话人说话。"
+        else:
+            hint += "这句面向群里正在聊的话题；QQ 引用只标记接的是哪句。"
         if self.mentions and allow_inline:
             names = self._display_names()
             slots = {marker: names.get(user_id, f"第{index}位待通知的对象")

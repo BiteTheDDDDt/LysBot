@@ -20,11 +20,10 @@ class VoiceIntentTests(unittest.IsolatedAsyncioTestCase):
     async def test_voice_decision_for_third_party_survives_normalization(self):
         decision, prompt = await self.plan('为@某人(QQ:42) 播放 see you again', {
             'action': 'reply', 'parts': [{'type': 'voice'}],
-            'reply_hint': '为对方用原创送别台词接梗，不播放原曲',
         })
         self.assertEqual(decision.required_tool, 'send_voice')
         self.assertEqual([part.type for part in decision.parts], ['voice'])
-        self.assertIn('送别', decision.reply_hint)
+        self.assertIn('送别', prompt)
         self.assertIn('是否明确指向 bot: True', prompt)
         self.assertIn('某人是任务受众', prompt)
         self.assertIn(VOICE_INTENT_POLICY, prompt)

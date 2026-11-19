@@ -33,7 +33,7 @@ class PlannerWaitTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_passive_wait_replans_with_latest_context_then_replies(self):
         event = SimpleNamespace(group_id=77, user_id=42, to_me=True, get_plaintext=lambda: "先等等")
-        final_decision = PlannerDecision(action="reply", reply_hint="现在接话")
+        final_decision = PlannerDecision(action="reply")
         plan = AsyncMock(return_value=final_decision)
         handle = AsyncMock()
 

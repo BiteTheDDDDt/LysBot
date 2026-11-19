@@ -26,7 +26,7 @@ class ProactiveValueTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(decision.action, "reply")
             self.assertEqual(decision.parts[0].type, part["type"])
             self.assertEqual(decision.reason, "群友在吐槽票价")
-            self.assertEqual(decision.reply_hint, "")
+            self.assertEqual(decision.reply_hint, ())
 
     async def test_direct_requests_and_wait_unaffected(self):
         self.assertEqual((await self.plan({"action": "reply"}, mode="passive")).action, "reply")
