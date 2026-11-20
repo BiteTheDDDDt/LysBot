@@ -104,7 +104,10 @@ class PublicAddressTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_size_cap_is_enforced_while_streaming(self):
         client = _FakeClient([_FakeResponse(body=b"x" * 32)])
+        stages = []
         with patch.object(public_net.socket, "getaddrinfo",
                           return_value=[(None, None, None, None, ("93.184.216.34", 443))]):
             with self.assertRaises(ValueError):
-                await public_net.fetch_pinned_bytes("https://example.com/a.png", client=client, max_bytes=16)
+                await public_net.fetch_pinned_bytes("https://example.com/a.png", client=client, max_bytes=16,
+                                                    on_stage=stages.append)
+        self.assertEqual(stages, ["resolve", "request", "headers", "body"])

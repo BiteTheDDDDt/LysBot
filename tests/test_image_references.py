@@ -308,7 +308,7 @@ class ImageReferenceTests(unittest.IsolatedAsyncioTestCase):
                     bot.send.assert_awaited_once()
                 else:
                     run.assert_not_awaited()
-                    bot.send.assert_awaited_once_with(event, chat.PRIVATE_IMAGE_FAILURE)
+                    bot.send.assert_awaited_once_with(event, chat.IMAGE_FAILURE)
 
     async def test_aggregation_retains_both_owners_originals_and_requires_selection(self):
         pending = []

@@ -44,7 +44,8 @@ from .image_references import ImageReference, image_reference_store, reference_m
 
 
 REQUEST_FAILURE = "刚才没处理成功，可以再发一次。"
-PRIVATE_IMAGE_FAILURE = "这次没能读到图片，可以重新发一下。"
+IMAGE_FAILURE = "这次没能读到图片，可以重新发一下。"
+MISSING_IMAGE_GUIDANCE = "按每条消息的原始图片编号回答可见内容，简短指出需要重发的图片编号。"
 
 
 async def _send_request_notice(bot, event, group_id, text):
@@ -685,20 +686,25 @@ def _group_message_direction(
     return targets_bot, targets_other
 
 
+def _image_positions(resolved: ResolvedIncomingMessage) -> dict[str, int]:
+    positions = {}
+    for index, url in enumerate(resolved.image_slots, 1):
+        if url:
+            positions.setdefault(url, index)
+    return positions
+
+
 def _capture_incoming_images(event: MessageEvent, downloaded: list[tuple[str, str]]) -> list[ImageReference]:
     sid = session_key(event.user_id, getattr(event, "group_id", None))
     sender = getattr(event, "sender", {})
     name = object_value(sender, "card", "") or object_value(sender, "nickname", "") or str(event.user_id)
     resolved = getattr(event, "_llm_resolved_incoming_message", None)
     quoted_urls = set(resolved.context_image_urls) if resolved else set()
-    private_positions = {}
-    if resolved and not getattr(event, "group_id", None):
-        for index, url in enumerate(resolved.image_slots, 1):
-            private_positions.setdefault(url, index)
+    positions = _image_positions(resolved) if resolved else {}
     references = []
     previous = {ref.base64: ref for ref in getattr(event, "_llm_image_references", [])}
     for index, (url, encoded) in enumerate(downloaded, 1):
-        index = private_positions.get(url, index)
+        index = positions.get(url, index)
         source = "引用/转发图片" if url in quoted_urls else "附图"
         label = previous[encoded].label if encoded in previous else (
             f"{name}(QQ:{event.user_id}) 消息{getattr(event, 'message_id', '?')} {source}{index}"
@@ -723,6 +729,19 @@ def _missing_image_references(event: MessageEvent, images: list[str]) -> bool:
 
 def _image_reference_text(references: list[ImageReference]) -> str:
     return "\n".join(f"{reference_marker(ref)} {ref.label}" for ref in references)
+
+
+def _group_image_context(event: MessageEvent, images: list[str]) -> str:
+    references = _current_image_references(event, images)
+    slots = getattr(event, "_llm_image_slots", None)
+    if not slots:
+        return _image_reference_text(references)
+    by_image = {ref.base64: ref for ref in references}
+    return "\n".join(
+        f"图片{index}: {reference_marker(by_image[encoded])} {by_image[encoded].label}"
+        if encoded in by_image else f"图片{index}: 未能读取"
+        for index, encoded in enumerate(slots, 1)
+    )
 
 
 _incoming_tasks: set[asyncio.Task] = set()
@@ -853,19 +872,21 @@ async def _enrich_group_record(bot, event, resolved, stored_message, sender_name
     faces = resolved.faces
 
     # 忽略空消息（没有文字、没有图片、没有表情）
-    if not message and not images_base64 and not faces:
+    if not message and not resolved.image_slots and not faces:
         return
 
 
     # 构建完整消息内容
     body = message
     formatted_content = f"【群员-{sender_name}】 {body}"
+    if resolved.image_slots and not images_base64 and not body:
+        formatted_content = f"【群员-{sender_name}】 [图片下载失败]"
 
     has_meme_image = False
     # 如果有图片，识别图片内容（同时顺手判定是否表情包并入库）
     if images_base64:
         from .memes import clean_meme_memory_description, meme_manager
-        image_descriptions = []
+        image_descriptions = {}
         analyses = await asyncio.gather(*(
             model_manager.analyze_image_for_meme(encoded, session_id=f"group_{group_id}")
             for _, encoded in downloaded_images
@@ -885,7 +906,7 @@ async def _enrich_group_record(bot, event, resolved, stored_message, sender_name
                     session_key(user_id, group_id), img_b64, f"{references[idx].label}：{desc}",
                 )
                 references[idx] = ref
-                image_descriptions.append(f"{reference_marker(ref)} {desc}")
+                image_descriptions[url] = f"{reference_marker(ref)} {desc}"
                 is_direct_image = url in direct_image_urls
                 if type(meta.get("random_eligible")) is bool:
                     import base64 as _b64
@@ -925,7 +946,10 @@ async def _enrich_group_record(bot, event, resolved, stored_message, sender_name
             except Exception as e:
                 logger.warning(f"[图片识别] 失败，已忽略该图片: group_id={group_id}, index={idx}, error={e}")
         if image_descriptions:
-            desc_text = "\n".join([f"图片{i+1}（自动识别，仅作背景）: {d}" for i, d in enumerate(image_descriptions)])
+            desc_text = "\n".join(
+                f"图片{index}（自动识别，仅作背景）: {image_descriptions[url]}"
+                for index, url in enumerate(resolved.image_slots, 1) if url in image_descriptions
+            )
             formatted_content = (
                 f"[{sender_name}] {desc_text}\n\n用户消息: {body}"
                 if body
@@ -962,11 +986,11 @@ async def _enrich_group_record(bot, event, resolved, stored_message, sender_name
     proactive_content = unsolicited_view(formatted_content)
     proactive_manager.add_recent_message(group_id, proactive_content, user_id, _get_event_message_id(event),
                                          sender_name=sender_name)
-    if not image_urls or plain_message.strip():
+    if not resolved.image_slots or plain_message.strip():
         proactive_manager.increment_counter(group_id)
 
     # 尝试主动发言（使用formatted_content，包含图片描述）
-    if image_urls and not plain_message.strip():
+    if resolved.image_slots and not plain_message.strip():
         return  # Sharing a picture is not a request for unsolicited captioning.
     if has_meme_image:
         logger.info(f"[主动发言] 跳过：当前图片已识别为表情包，group_id={group_id}")
@@ -1060,11 +1084,13 @@ async def prepare_incoming_message(bot: Bot, event: MessageEvent) -> PreparedInc
     _capture_incoming_images(event, downloaded)
 
     encoded_by_url = dict(downloaded)
+    image_slots = [encoded_by_url.get(url) for url in resolved.image_slots]
+    event._llm_image_slots = image_slots
     return PreparedIncomingMessage(
         resolved=resolved,
         plain_text=plain_text,
         message=resolved.compose(plain_text),
-        image_slots=[encoded_by_url.get(url) for url in resolved.image_slots],
+        image_slots=image_slots,
         images_base64=[encoded for _, encoded in downloaded],
         faces=resolved.faces,
     )
@@ -1109,7 +1135,8 @@ async def _handle_chat(bot: Bot, event: MessageEvent):
     # 如果没有消息内容，设置默认
     if not message:
         if not images_base64 and not faces:
-            # 群聊仅@且无内容时不回复
+            if getattr(event, "_llm_image_slots", ()) and _group_message_direction(event, event.get_plaintext())[0]:
+                await _send_request_notice(bot, event, group_id, IMAGE_FAILURE)
             return
         if images_base64:
             message = "请描述这张图片"
@@ -1131,7 +1158,7 @@ async def _process_chat(bot: Bot, event: MessageEvent):
     faces = prepared.faces
 
     if prepared.image_slots and not images_base64:
-        await _send_request_notice(bot, event, None, PRIVATE_IMAGE_FAILURE)
+        await _send_request_notice(bot, event, None, IMAGE_FAILURE)
         return
 
     # 如果没有消息内容，设置默认
@@ -1310,10 +1337,10 @@ async def _do_handle_single_chat(bot: Bot, event: MessageEvent, message: str,
                 image_descriptions.append(f"图片{index}: 未能读取")
 
         if len(failed) == len(image_descriptions):
-            await _send_request_notice(bot, event, None, PRIVATE_IMAGE_FAILURE)
+            await _send_request_notice(bot, event, None, IMAGE_FAILURE)
             return
         if failed:
-            image_guidance = "按原始图片编号回答可见内容，简短指出未能读取的图片编号。"
+            image_guidance = MISSING_IMAGE_GUIDANCE
         user_content = "\n".join(image_descriptions) + f"\n\n用户消息: {display_message}"
         query_text = user_content
         user_images = None
@@ -1322,9 +1349,11 @@ async def _do_handle_single_chat(bot: Bot, event: MessageEvent, message: str,
         caller = "chat:group_with_imgs"
 
     if group_id:
-        references = _current_image_references(event, images_base64)
-        if references:
-            user_content += "\n" + _image_reference_text(references)
+        image_context = _group_image_context(event, images_base64)
+        if image_context:
+            user_content += "\n" + image_context
+        if None in getattr(event, "_llm_image_slots", ()):
+            image_guidance = MISSING_IMAGE_GUIDANCE
 
     if isinstance(event, PrivateMessageEvent):
         await memory_manager.add_message(
@@ -1536,7 +1565,9 @@ async def _do_handle_merged_chat(
             combined_text_parts.append(f"【群员-{formatted_name} QQ:{pm.user_id}】 {pm.message}")
         if pm.images_base64:
             all_images.extend(pm.images_base64)
-            combined_text_parts.append(_image_reference_text(_current_image_references(pm.event, pm.images_base64)))
+        image_context = _group_image_context(pm.event, pm.images_base64)
+        if image_context:
+            combined_text_parts.append(image_context)
 
     # 合并后的消息文本
     combined_message = "\n".join(combined_text_parts)
@@ -1560,6 +1591,8 @@ async def _do_handle_merged_chat(
         "不必逐人点名或逐条答复，仍遵守本轮文字预算。"
         if participant_count > 1 else ""
     )
+    if any(None in getattr(pm.event, "_llm_image_slots", ()) for pm in pending_messages):
+        situation_hint = "\n".join(part for part in (situation_hint, MISSING_IMAGE_GUIDANCE) if part)
 
     await execute_planned_side_effect(planner_decision)
     planned_meme = await prepare_planned_meme(planner_decision)

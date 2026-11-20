@@ -195,6 +195,31 @@ class IncomingMemoryTests(unittest.IsolatedAsyncioTestCase):
             [(first.source_id, "A：图片是一只猫"), (second.source_id, "B：保留在近期上下文")],
         )
 
+    async def test_budget_leaves_unread_correction_in_recent_history(self):
+        forward = await self.add("长转发：" + "甲" * 2200 + "转发结束")
+        correction = await self.add("纠正一下，约定改成周六见")
+        newest = await self.add("另一个话题")
+        with (
+            patch.object(memory_module.config, "enable_summary", True),
+            patch.object(memory_module.config, "summary_threshold", 2),
+            patch.object(memory_module.config, "summary_messages", 5),
+            patch.object(memory_module.config, "max_history_messages", 1),
+            patch.object(memory_module.config, "summary_input_max_chars", 1000),
+            patch.object(memory_module.model_manager, "chat", AsyncMock(
+                return_value='{"summary":"转发内容","memory_candidates":[]}'
+            )) as summarize,
+        ):
+            await self.manager._compress_history(self.session_id)
+        prompts = [call.args[0][0].content for call in summarize.await_args_list]
+        self.assertEqual(len(prompts), 3)
+        self.assertIn("转发结束", prompts[-1])
+        self.assertTrue(all(correction.content not in prompt for prompt in prompts))
+        self.assertEqual([row["source_id"] for row in await self.stored_context()], [correction.source_id, newest.source_id])
+        self.assertEqual(self.manager._compressed_count[self.session_id], 1)
+        async with self.db.execute("SELECT provenance_json FROM summaries WHERE session_id=?", (self.session_id,)) as cursor:
+            row = await cursor.fetchone()
+        self.assertEqual(json.loads(row[0])["source_ids"], [forward.source_id])
+
 
 if __name__ == "__main__":
     unittest.main()

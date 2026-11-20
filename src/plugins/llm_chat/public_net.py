@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import socket
+from typing import Callable
 from urllib.parse import urlparse
 
 import httpx
@@ -67,15 +68,20 @@ async def fetch_pinned_bytes(
     content_type_prefixes: tuple[str, ...] = (),
     max_redirects: int = 4,
     headers: dict[str, str] | None = None,
+    on_stage: Callable[[str], None] | None = None,
 ) -> tuple[bytes, str]:
     """Stream a public URL with a hard size cap, validating every redirect hop."""
     from urllib.parse import urljoin
 
     current = url
     for _ in range(max_redirects):
+        if on_stage:
+            on_stage("resolve")
         address = await resolve_public_address(current, client)
         original = httpx.URL(current)
         request_headers = {"Host": original.netloc.decode("ascii"), "Connection": "close", **(headers or {})}
+        if on_stage:
+            on_stage("request")
         async with client.stream(
             "GET",
             original.copy_with(host=address),
@@ -86,6 +92,8 @@ async def fetch_pinned_bytes(
             if response.is_redirect:
                 current = urljoin(current, response.headers.get("location", ""))
                 continue
+            if on_stage:
+                on_stage("headers")
             response.raise_for_status()
             content_type = response.headers.get("content-type", "").split(";")[0].strip().lower()
             if content_type_prefixes and content_type and not content_type.startswith(content_type_prefixes):
@@ -94,9 +102,13 @@ async def fetch_pinned_bytes(
             if declared > max_bytes:
                 raise ValueError("response exceeds size limit")
             data = bytearray()
+            if on_stage:
+                on_stage("body")
             async for chunk in response.aiter_bytes():
                 data.extend(chunk)
                 if len(data) > max_bytes:
                     raise ValueError("response exceeds size limit")
             return bytes(data), content_type
+    if on_stage:
+        on_stage("redirect")
     raise ValueError("too_many_redirects")

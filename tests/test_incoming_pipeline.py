@@ -87,6 +87,36 @@ class IncomingPipelineTests(unittest.IsolatedAsyncioTestCase):
         ) as cursor:
             return await cursor.fetchall()
 
+    async def test_unreadable_group_image_only_notifies_a_direct_request(self):
+        with patch.object(chat, "download_images_as_base64", AsyncMock(return_value=[])), \
+             patch.object(chat, "plan_chat_action", AsyncMock()) as plan:
+            direct = self.event(MessageSegment.at(999) + MessageSegment.image(self.image_url))
+            ordinary = self.event(MessageSegment.image(self.image_url), message_id=2, direct=False)
+            await chat.handle_chat(self.bot, direct)
+            await chat.handle_chat(self.bot, ordinary)
+        self.bot.send.assert_awaited_once_with(direct, chat.IMAGE_FAILURE)
+        plan.assert_not_awaited()
+
+    async def test_group_partial_download_preserves_position_in_history_and_reply(self):
+        second = "https://example.com/second.png"
+        event = self.event(Message("第二张写了什么？") + MessageSegment.image(self.image_url) + MessageSegment.image(second))
+        with (
+            patch.object(chat, "download_images_as_base64", AsyncMock(return_value=[(second, "c2Vjb25k")])),
+            patch.object(chat.config, "aggregation_window", 0),
+            patch.object(chat, "plan_chat_action", AsyncMock(return_value=chat.PlannerDecision())),
+            patch.object(chat, "build_context_messages", AsyncMock(return_value=[])) as context,
+            patch.object(chat.model_manager, "run_turn", AsyncMock(return_value="第一张没读到，第二张是一只猫")),
+        ):
+            await chat.record_group_message(self.bot, event)
+            await chat.handle_chat(self.bot, event)
+            await chat.aggregation_buffers[self.group_id].task
+        content = context.await_args.kwargs["user_content"]
+        self.assertIn("图片1: 未能读取\n图片2:", content)
+        self.assertIn("附图2", content)
+        self.assertIn(chat.MISSING_IMAGE_GUIDANCE, context.await_args.kwargs["extra_system"])
+        self.assertIn("图片2（自动识别，仅作背景）", (await self.rows())[0][1])
+        self.bot.send.assert_awaited_once()
+
     def blocked_vision(self):
         entered, release = asyncio.Event(), asyncio.Event()
         self.gates.append(release)

@@ -97,7 +97,7 @@ class FollowupTests(unittest.IsolatedAsyncioTestCase):
                     followups.answered(7, '哦vllm sglang这个我有点感兴趣，怎么参与？', direct=True)
                 window = followups.windows[7]
                 event = SimpleNamespace(group_id=7, user_id=55, self_id=999, to_me=False, message=Message(message), get_plaintext=lambda: message, sender=SimpleNamespace(card='甲', nickname='甲'))
-                resolved = SimpleNamespace(plain_text=message, compose=lambda: message, image_urls=[], direct_image_urls=[], faces=[])
+                resolved = chat.ResolvedIncomingMessage(plain_text=message)
                 bot = SimpleNamespace(send=AsyncMock())
 
                 def stored_message(_user_id, role, content, *args, **kwargs):
@@ -187,7 +187,7 @@ class FollowupTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_proactive_reply_cannot_turn_its_trigger_into_a_followup(self):
         self.event.sender = SimpleNamespace(card='甲', nickname='甲')
-        resolved = SimpleNamespace(plain_text='xp是自由的', compose=lambda: 'xp是自由的', image_urls=[], direct_image_urls=[], faces=[])
+        resolved = chat.ResolvedIncomingMessage(plain_text='xp是自由的')
 
         async def proactive_reply(*args, **kwargs):
             followups.answered(7, 'XP自由，钱包可不自由。', direct=True)

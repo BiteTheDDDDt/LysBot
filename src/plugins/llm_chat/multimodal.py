@@ -41,23 +41,33 @@ def _remember_download(url: str, image_data: bytes) -> None:
 
 
 async def _download_image_uncached(url: str) -> Optional[bytes]:
+    stage = "queue"
+
+    def set_stage(value: str) -> None:
+        nonlocal stage
+        stage = value
+
     try:
         # Incoming image URLs are user-controlled: resolve and pin a public
         # address so loopback/link-local/private targets are never fetched.
         from .public_net import fetch_pinned_bytes
 
         limit = max(1, int(config.image_download_max_bytes))
-        async with _download_semaphore, httpx.AsyncClient(timeout=15.0, trust_env=False) as client:
+        async with asyncio.timeout(30), _download_semaphore, httpx.AsyncClient(timeout=15.0, trust_env=False) as client:
             data, _ = await fetch_pinned_bytes(
                 url,
                 client=client,
                 max_bytes=limit,
                 content_type_prefixes=("image/", "application/octet-stream"),
                 headers={"User-Agent": "Mozilla/5.0 (compatible; QQBot/1.0)"},
+                on_stage=set_stage,
             )
+            if not data:
+                raise ValueError("empty_image")
             return data
     except Exception as error:
-        logger.warning(f"[multimodal] 图片下载失败: {error}")
+        status = f" status={error.response.status_code}" if isinstance(error, httpx.HTTPStatusError) else ""
+        logger.warning(f"[multimodal] 图片下载失败 stage={stage} error_type={type(error).__name__}{status}")
         return None
 
 async def download_image(url: str) -> Optional[bytes]:
@@ -71,12 +81,10 @@ async def download_image(url: str) -> Optional[bytes]:
     if task is None:
         async def fetch():
             try:
-                data = await asyncio.wait_for(_download_image_uncached(url), timeout=30)
+                data = await _download_image_uncached(url)
                 if data:
                     _remember_download(url, data)
                 return data
-            except asyncio.TimeoutError:
-                return None
             finally:
                 if _download_pending.get(url) is asyncio.current_task():
                     _download_pending.pop(url, None)
