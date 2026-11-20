@@ -173,6 +173,7 @@ def connect(path: Path, *, vectors=False, deadline=None, operation="memory_index
     started = time.monotonic()
     db = sqlite3.connect(path, timeout=5)
     try:
+        db.create_function("memory_digest", 1, digest, deterministic=True)
         db.row_factory = sqlite3.Row
         db.execute("PRAGMA busy_timeout=5000")
         db.execute("PRAGMA synchronous=NORMAL")

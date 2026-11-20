@@ -178,7 +178,9 @@ def _scope(db, sid):
 
 
 def _views(db, sid, gen, sql):
-    from .memory_changes import active_sql
+    from .memory_changes import supported_sql
+    from .memory_index import digest
+    db.create_function("memory_digest", 1, digest, deterministic=True)
     while True:
         prefix = "scope_" + secrets.token_hex(16)
         if prefix not in sql.lower():
@@ -193,12 +195,12 @@ def _views(db, sid, gen, sql):
         "summaries": (
             "summaries",
             f"id, 'h:{gen}:summaries:'||id AS source_id, content, time_range, created_at, provenance_json",
-            " AND " + active_sql("summaries"),
+            " AND " + supported_sql("summaries"),
         ),
         "facts": (
             "important_info",
             f"id, 'h:{gen}:important_info:'||id AS source_id, CAST(user_id AS TEXT) AS user_id, info_type, content, created_at, provenance_json",
-            " AND " + active_sql("important_info"),
+            " AND " + supported_sql("important_info"),
         ),
     }
     private = {}
@@ -222,8 +224,12 @@ def _authorize(private):
         if action in (sqlite3.SQLITE_SELECT, sqlite3.SQLITE_RECURSIVE):
             return sqlite3.SQLITE_OK
         if action == sqlite3.SQLITE_FUNCTION:
+            if second == "memory_digest" and private.get(source) in {"important_info", "summaries"}:
+                return sqlite3.SQLITE_OK
             return sqlite3.SQLITE_OK if (second or "").lower() in FUNCTIONS else sqlite3.SQLITE_DENY
         if action == sqlite3.SQLITE_READ:
+            if database == "main" and first == "messages_detail" and private.get(source) in {"important_info", "summaries"}:
+                return sqlite3.SQLITE_OK
             if database == "main" and private.get(source) == first:
                 return sqlite3.SQLITE_OK
             if database == "temp" and first in {*SCHEMA, *private}:

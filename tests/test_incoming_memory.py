@@ -195,6 +195,28 @@ class IncomingMemoryTests(unittest.IsolatedAsyncioTestCase):
             [(first.source_id, "A：图片是一只猫"), (second.source_id, "B：保留在近期上下文")],
         )
 
+    async def test_correction_boundary_preserves_other_members_new_preference(self):
+        old = await self.add("甲的旧偏好")
+        await self.db.execute("INSERT INTO kv_meta(key,value) VALUES(?,?)",
+                              ("memory_corrected_through:" + self.session_id, str(old.source_id)))
+        await self.db.commit()
+        fresh = await self.manager.add_message(202, "user", "我吃素", self.group_id, sender_id=202)
+        await self.add("最近一条")
+        with (
+            patch.object(memory_module.config, "enable_summary", True),
+            patch.object(memory_module.config, "enable_important_info", True),
+            patch.object(memory_module.config, "summary_threshold", 2),
+            patch.object(memory_module.config, "max_history_messages", 1),
+            patch.object(memory_module.model_manager, "chat", AsyncMock(
+                return_value='{"summary":"偏好","memory_candidates":[1]}')),
+        ):
+            await self.manager._compress_history(self.session_id)
+        summaries = await self.db.execute_fetchall("SELECT provenance_json FROM summaries ORDER BY id")
+        self.assertEqual([(m["memory_state"], m["source_ids"]) for (raw,) in summaries for m in [json.loads(raw)]],
+                         [("stale", [old.source_id]), ("active", [fresh.source_id])])
+        jobs = await self.db.execute_fetchall("SELECT messages_json FROM important_info_jobs")
+        self.assertEqual([[m["source_id"] for m in json.loads(raw)] for (raw,) in jobs], [[fresh.source_id]])
+
     async def test_budget_leaves_unread_correction_in_recent_history(self):
         forward = await self.add("长转发：" + "甲" * 2200 + "转发结束")
         correction = await self.add("纠正一下，约定改成周六见")

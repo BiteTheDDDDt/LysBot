@@ -122,6 +122,21 @@ class AggregatedChatTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("第一条", self.planner.await_args.kwargs["current_message"])
         self.assertIn("第二条", self.planner.await_args.kwargs["current_message"])
 
+    async def test_delivered_image_question_replaces_previous_followup(self):
+        from src.plugins.llm_chat import followups
+        from src.plugins.llm_chat.reply_policy import MEDIA_REPLY
+
+        event = self._pending_message(42, "甲", "发张图").event
+        followups.answered(99, "晚饭吃什么？", direct=True)
+        self.addCleanup(followups.windows.pop, 99, None)
+        bot = SimpleNamespace(send=AsyncMock())
+        with (patch("src.plugins.llm_chat.tools.get_last_sent_image", return_value={"model": "test"}),
+              patch.object(chat.memory_manager, "add_message", AsyncMock())):
+            await chat._finish_response_turn(bot, event, 42, 99, direct=True, response="天空换成什么颜色？",
+                                             reply_policy=MEDIA_REPLY, planner_decision=None, planned_meme=None)
+        bot.send.assert_awaited_once()
+        self.assertEqual(followups.active(99).answer, "天空换成什么颜色？")
+
     async def test_merged_model_error_can_finalize_media_for_primary_user(self):
         pending = self._pending_message(42, "甲", "请发语音")
         bot = SimpleNamespace(send=AsyncMock())

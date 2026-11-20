@@ -446,6 +446,10 @@ async def _finish_response_turn(bot, event, user_id, group_id, *, direct, respon
 
     async def send_media_followup(value):
         await send_text(value, QQAddressing().text(value))
+        if group_id:
+            from . import followups
+            followups.answered(group_id, value, direct=direct,
+                               closed=bool(planner_decision and planner_decision.action == "close"))
 
     if await _finalize_immediate_tool_turn(user_id, group_id, followup_text=text,
                                            send_followup=send_media_followup, model_spec=model_spec):
@@ -483,60 +487,12 @@ async def _report_response_failure(bot, event, user_id, group_id, *, direct, err
 
 def _drop_current_turn_from_history(
     history: list[LLMMessage],
-    current_turns: list[tuple[str, str, bool]],
+    events,
 ) -> list[LLMMessage]:
-    """Remove group messages already represented by the current user prompt.
-
-    The group recorder runs before the responder, so the same incoming message
-    can otherwise be present both in history and as the final user message.
-    """
-    if not history or not current_turns:
-        return history
-
-    unresolved = [
-        {
-            "name": (name or "").strip(),
-            "text": (text or "").strip(),
-            "has_media": has_media,
-        }
-        for name, text, has_media in current_turns
-    ]
-    unresolved = [item for item in unresolved if item["name"] or item["text"] or item["has_media"]]
-    if not unresolved:
-        return history
-
-    remove_indices: set[int] = set()
-    for idx in range(len(history) - 1, -1, -1):
-        msg = history[idx]
-        if msg.role == "assistant" and remove_indices:
-            break
-        if msg.role != "user":
-            continue
-
-        content = msg.content or ""
-        msg_name = (msg.name or "").strip()
-        for spec_idx in range(len(unresolved) - 1, -1, -1):
-            spec = unresolved[spec_idx]
-            if spec["name"] and msg_name != spec["name"]:
-                continue
-            if spec["text"]:
-                if spec["text"] not in content:
-                    continue
-            elif not spec["has_media"]:
-                continue
-
-            remove_indices.add(idx)
-            unresolved.pop(spec_idx)
-            break
-
-        if not unresolved:
-            break
-
-    if not remove_indices:
-        return history
-
-    logger.info(f"[context] 从历史上下文移除本轮已记录群消息 {len(remove_indices)} 条，避免重复注入")
-    return [msg for idx, msg in enumerate(history) if idx not in remove_indices]
+    """Only remove records known to be represented in the current prompt."""
+    ids = {getattr(event, "_llm_memory_source_id", None) for event in events}
+    ids.discard(None)
+    return [message for message in history if message.source_id not in ids]
 
 
 async def process_aggregated_messages(bot: Bot, group_id: int):
@@ -805,6 +761,7 @@ async def _record_group_message(bot: Bot, event: GroupMessageEvent):
         0, "user", initial_content, group_id, name=sender_name, sender_id=user_id, timestamp=received_at,
     )
     ensure_current_session()
+    event._llm_memory_source_id = getattr(stored_message, "source_id", None)
     event._llm_memory_content = initial_content
 
     # OneBot reply/forward 只在这里展开一次；后续响应 matcher 复用事件缓存。
@@ -1361,7 +1318,7 @@ async def _do_handle_single_chat(bot: Bot, event: MessageEvent, message: str,
     if group_id:
         context_history = _drop_current_turn_from_history(
             history,
-            [(sender_name, message, bool(images_base64 or faces))],
+            [event],
         )
     messages = await build_context_messages(
         history=context_history,
@@ -1588,10 +1545,7 @@ async def _do_handle_merged_chat(
     planned_meme = await prepare_planned_meme(planner_decision)
     context_history = _drop_current_turn_from_history(
         history,
-        [
-            (format_sender_name(pm.sender_name), pm.message or "", bool(pm.images_base64 or pm.faces))
-            for pm in pending_messages
-        ],
+        [pm.event for pm in pending_messages],
     )
     messages = await build_context_messages(
         history=context_history,

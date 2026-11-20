@@ -646,26 +646,44 @@ class MemoryManager:
             since,
         )
 
+    async def _correction_cutoff(self, session_id):
+        db = await self._get_db()
+        async with db.execute("SELECT value FROM kv_meta WHERE key=?",
+                              ("memory_corrected_through:" + session_id,)) as cursor:
+            row = await cursor.fetchone()
+        return int(row[0]) if row else None
+
     async def _compress_history(self, session_id: str, user_id: int = 0):
         """Summarize outside locks, then commit the summary, job and cursor atomically."""
         if not config.enable_summary or self._summarizing.get(session_id):
             return
         self._summarizing[session_id] = True
         epoch = self._session_epochs.get(session_id, 0)
+        split_remaining = 0
         try:
             while True:
                 async with self._session_lock(session_id):
                     current = self._cache.get(session_id, [])
-                    if len(current) <= config.summary_threshold:
+                    if not split_remaining and len(current) <= config.summary_threshold:
                         return
                     visible = [m for m in current if m.role in {"user", "assistant"} and not m.is_thinking]
                     count = min(max(1, int(config.summary_messages)), len(visible) - max(1, int(config.max_history_messages)))
+                    if split_remaining:
+                        count = min(count, split_remaining)
                     if count <= 0:
                         return
                     budget = max(1000, int(config.summary_input_max_chars))
                     batch, lines = [], []
                     size = 0
+                    cutoff = await self._correction_cutoff(session_id)
+                    def predates_correction(message):
+                        return cutoff is not None and (message.source_id or 0) <= cutoff
+
+                    stale = predates_correction(visible[0])
                     for index, message in enumerate(visible[:count], 1):
+                        if predates_correction(message) != stale:
+                            split_remaining = count
+                            break
                         prefix = f"#{index} {message.role}[id={message.sender_id}, name={message.name or '-'}]: "
                         line = prefix + message.content
                         if lines and size + 1 + len(line) > budget:
@@ -727,9 +745,12 @@ class MemoryManager:
                             db = await self._get_db()
                             try:
                                 await db.execute("BEGIN IMMEDIATE")
-                                async with db.execute("SELECT value FROM kv_meta WHERE key=?", ("memory_corrected_through:" + session_id,)) as cursor:
-                                    corrected = await cursor.fetchone()
-                                stale = bool(corrected and any(not m.source_id or m.source_id <= int(corrected[0]) for m in batch))
+                                latest_cutoff = await self._correction_cutoff(session_id)
+                                if latest_cutoff != cutoff:
+                                    # A correction arrived during inference. Rebuild the batch
+                                    # against its new boundary before advancing the cursor.
+                                    await db.rollback()
+                                    break
                                 await db.execute(
                                     "INSERT INTO summaries(session_id,content,time_range,created_at,provenance_json) VALUES (?,?,?,?,?)",
                                     (session_id, summary, self._get_messages_time_range(batch), now,
@@ -759,6 +780,9 @@ class MemoryManager:
                             else:
                                 break
                         await asyncio.sleep(SQLITE_WRITE_RETRY_BASE_DELAY * (attempt + 1))
+                    if latest_cutoff != cutoff:
+                        continue
+                    split_remaining = max(0, split_remaining - len(batch))
                     self._cache[session_id] = remaining
                     self._compressed_count[session_id] = end_idx
                     self._pending_details.pop(session_id, None)

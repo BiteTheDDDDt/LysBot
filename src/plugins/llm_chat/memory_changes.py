@@ -18,6 +18,18 @@ def active_sql(kind, alias=None):
     return f"COALESCE(json_extract({table}.provenance_json,'$.memory_state'),'active')='active'"
 
 
+def supported_sql(kind):
+    """A derived record is visible while its scoped original sources still match."""
+    meta = f"{kind}.provenance_json"
+    expected = f"json_extract({meta}, '$.source_hashes.' || ref.value)"
+    return f"""({active_sql(kind)} AND NOT EXISTS (
+        SELECT 1 FROM json_each({meta}, '$.source_ids') AS ref
+        LEFT JOIN main.messages_detail AS orig
+          ON orig.id=ref.value AND orig.session_id={kind}.session_id AND COALESCE(orig.is_thinking,0)=0
+        WHERE orig.id IS NULL OR ({expected} IS NOT NULL AND {expected} <> memory_digest(orig.content))
+    ))"""
+
+
 def correction_epoch(db, sid):
     row = db.execute("SELECT value FROM kv_meta WHERE key=?", ("memory_correction:" + sid,)).fetchone()
     return row[0] if row else ""

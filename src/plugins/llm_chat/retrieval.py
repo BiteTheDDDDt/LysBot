@@ -142,20 +142,11 @@ class HistorySearch:
     def _support_live(self, db, row, kind, sid):
         if kind == "messages":
             return True
-        from .memory_changes import active_sql
-        if not db.execute(f"SELECT 1 FROM {kind} WHERE id=? AND session_id=? AND {active_sql(kind)}",
-                          (row["id"], sid)).fetchone():
-            return False
-        meta = json.loads(row["provenance_json"] or "{}")
-        hashes = meta.get("source_hashes", {})
-        for mid in meta.get("source_ids", []):
-            source = db.execute(
-                "SELECT content FROM messages_detail WHERE id=? AND session_id=? AND COALESCE(is_thinking,0)=0",
-                (mid, sid),
-            ).fetchone()
-            if not source or (str(mid) in hashes and digest(source[0]) != hashes[str(mid)]):
-                return False
-        return True
+        from .memory_changes import supported_sql
+        return db.execute(
+            f"SELECT 1 FROM {kind} WHERE id=? AND session_id=? AND {supported_sql(kind)}",
+            (row["id"], sid),
+        ).fetchone() is not None
 
     async def profile(self, sid, owners, budget=1000):
         """A bounded current view, computed from assertions and live support."""
@@ -742,6 +733,11 @@ class HistorySearch:
                     originals.append(self._original_item(source, kind, gen))
             if stale or not originals:
                 continue
+            if row["kind"] == "messages" and len(originals) < len(links):
+                # A window ID expands to every linked message. Return the matching
+                # originals so their IDs, timestamps and subsequent reads agree.
+                items.extend(originals)
+                continue
             # Filtered author results expose only the selected speakers' text.
             content = (
                 "\n".join(o["excerpt"] for o in originals)
@@ -892,6 +888,8 @@ class HistorySearch:
                 if not self._support_live(db, row, kind, sid):
                     raise ValueError("supporting_source_deleted_or_changed")
                 item = self._original_item(row, kind, gen, full=True)
+                if anchor:
+                    item["relation"] = "anchor" if item["id"] == anchor else "context"
                 start_char = char_offset if index == offset else 0
                 if not 0 <= start_char <= len(item["content"]):
                     raise ValueError("invalid_source_offset")

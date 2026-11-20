@@ -99,6 +99,40 @@ class SearchStorageTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(all(set(i["authors"]) <= {"101"} for i in found["items"]))
         self.assertNotIn("Orion", json.dumps(found, ensure_ascii=False))
 
+    async def test_filtered_result_ids_read_only_matching_originals(self):
+        found = await self.search.search("group_7", query="Orion", mode="keyword", sources=["messages"],
+                                         author_ids=["202"], since="2026-09-01T10:01:00")
+        self.assertTrue(found["items"])
+        for item in found["items"]:
+            self.assertEqual(item["event_time"], "2026-09-01T10:01:00")
+            opened = await self.search.read("group_7", ids=[item["id"]])
+            self.assertEqual([o["id"] for o in opened["items"]], ["h:0:messages:2"])
+
+    async def test_changed_support_disappears_from_counts_and_reads(self):
+        from src.plugins.llm_chat.history_sql import query_history_sql
+        from src.plugins.llm_chat.memory_index import digest
+        with connect(self.manager._db_path) as db:
+            original = db.execute("SELECT content FROM messages_detail WHERE id=1").fetchone()[0]
+            db.execute("UPDATE important_info SET provenance_json=? WHERE id=1",
+                       (json.dumps({"source_ids": [1], "source_hashes": {"1": digest(original)}}),))
+        for count in (1, 0):
+            rows = await query_history_sql(self.manager._db_path, "group_7", "SELECT count(*) FROM facts")
+            self.assertEqual(rows["rows"], [[count]])
+            read = await self.search.read("group_7", ids=["h:0:important_info:1"])
+            self.assertEqual(len(read["items"]), count)
+            if count:
+                with connect(self.manager._db_path) as db:
+                    db.execute("UPDATE messages_detail SET content=content||'；旧计划已作废' WHERE id=1")
+
+    async def test_final_citation_does_not_match_a_shorter_source_id(self):
+        runner = AgentRunner("group_7")
+        runner.memory_path = self.manager._db_path
+        first, tenth = "h:0:messages:1", "h:0:messages:10"
+        runner.evidence = {key: {"read_state": "original"} for key in (first, tenth)}
+        await runner.finish("complete", f"依据[{tenth}]")
+        self.assertEqual(runner.final_answer["evidence_ids"], [tenth])
+        self.assertEqual(runner.final_answer["read_evidence_ids"], [first, tenth])
+
     async def test_group_scope_applies_to_search_and_direct_ids(self):
         found = await self.search.search("group_7", query="5090", mode="keyword")
         self.assertNotIn("绝密", json.dumps(found, ensure_ascii=False))

@@ -97,6 +97,23 @@ class IncomingPipelineTests(unittest.IsolatedAsyncioTestCase):
         self.bot.send.assert_awaited_once_with(direct, chat.IMAGE_FAILURE)
         plan.assert_not_awaited()
 
+    async def test_direct_prompt_keeps_later_budget_condition_in_history(self):
+        request = self.event(Message("查预算"))
+        condition = self.event(Message("查预算先按300元算"), message_id=2, direct=False)
+        with (
+            patch.object(chat.config, "aggregation_window", 0),
+            patch.object(chat, "plan_chat_action", AsyncMock(return_value=chat.PlannerDecision())),
+            patch.object(chat, "build_context_messages", AsyncMock(return_value=[])) as context,
+            patch.object(chat.model_manager, "run_turn", AsyncMock(return_value="按300元算")),
+        ):
+            await chat.record_group_message(self.bot, request)
+            await chat.record_group_message(self.bot, condition)
+            await chat.handle_chat(self.bot, request)
+            await chat.aggregation_buffers[self.group_id].task
+        prompt = context.await_args.kwargs
+        self.assertIn("查预算", prompt["user_content"])
+        self.assertEqual([m.source_id for m in prompt["history"]], [condition._llm_memory_source_id])
+
     async def test_group_partial_download_preserves_position_in_history_and_reply(self):
         second = "https://example.com/second.png"
         event = self.event(Message("第二张写了什么？") + MessageSegment.image(self.image_url) + MessageSegment.image(second))

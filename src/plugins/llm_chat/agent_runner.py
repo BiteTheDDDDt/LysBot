@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import re
 import time
 import uuid
 from contextvars import ContextVar
@@ -283,13 +284,14 @@ class AgentRunner:
     async def finish(self, status, answer=None):
         self.status = status
         if answer is not None:
+            cited_tokens = set(re.findall(r"[A-Za-z0-9_:-]+", str(answer)))
             self.final_answer = {
                 "answer": str(answer),
                 "evidence_ids": list(dict.fromkeys(
                     ref for key, value in self.evidence.items()
                     if value.get("read_state") in {"original", "native_search"}
                     for ref in (value.get("source_ids", [key]) if value.get("read_state") == "native_search" else [key])
-                    if ref in str(answer) or (
+                    if ref in cited_tokens or (
                         (self.sources.get(ref, {}).get("url") or value.get("url"))
                         and (self.sources.get(ref, {}).get("url") or value.get("url")) in str(answer)
                     )
