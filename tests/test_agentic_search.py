@@ -330,6 +330,31 @@ class SearchStorageTests(unittest.IsolatedAsyncioTestCase):
             saved = json.loads(db.execute("SELECT messages FROM sessions WHERE session_id='group_7'").fetchone()[0])
         self.assertEqual(saved[-1]["source_id"], message.source_id)
 
+    async def test_same_preference_keeps_each_persons_source_after_storage(self):
+        messages = []
+        with patch.object(memory_module.config, "enable_summary", False):
+            for owner in (101, 202):
+                await self.manager.add_message(0, "user", "我喜欢喝茶", 7, sender_id=owner)
+                messages.append(self.manager._cache["group_7"][-1])
+        answer = [
+            {"user_id": m.sender_id, "type": "user_preference", "content": "喜欢喝茶",
+             "source_ids": [m.source_id], "assertion": "asserted"}
+            for m in messages
+        ]
+        await self.manager._enqueue_important_info_job("group_7", messages, 0, 0, 2)
+        job, _ = await self.manager._load_next_important_info_job()
+        with patch.object(models.model_manager, "chat", AsyncMock(return_value=json.dumps(answer))):
+            await self.manager._process_important_info_job(job)
+        with connect(self.manager._db_path) as db:
+            rows = db.execute(
+                "SELECT user_id, provenance_json FROM important_info WHERE session_id=? AND content=? ORDER BY user_id",
+                ("group_7", "喜欢喝茶"),
+            ).fetchall()
+        self.assertEqual(
+            [(owner, json.loads(meta)["source_ids"], json.loads(meta)["authors"]) for owner, meta in rows],
+            [(m.sender_id, [m.source_id], [str(m.sender_id)]) for m in messages],
+        )
+
     async def test_fact_extractor_rejects_a_source_from_another_group(self):
         message = models.Message(
             role="user", content="我打算买 RTX 5090 显卡", sender_id=101, source_id=1, timestamp="2026-09-01T10:00:00"

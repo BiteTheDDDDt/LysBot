@@ -83,7 +83,7 @@ def _parse_scoped_important_info_entries(
     *,
     fallback_user_id: int,
     allowed_user_ids: set[int],
-) -> List[tuple[int, str, str]]:
+) -> List[tuple[int, str, str, dict]]:
     """Parse structured profile facts while keeping legacy model output compatible."""
     raw = (result or "").strip()
     if not raw:
@@ -105,10 +105,12 @@ def _parse_scoped_important_info_entries(
         for info_type in allowed_types
         if str(info_type).strip()
     }
-    records: List[tuple[int, str, str]] = []
+    records = []
     if isinstance(parsed, dict):
         parsed = parsed.get("items")
     if isinstance(parsed, list):
+        if not parsed:
+            return []
         for item in parsed:
             if not isinstance(item, dict):
                 continue
@@ -121,14 +123,18 @@ def _parse_scoped_important_info_entries(
             if owner_id not in allowed_user_ids:
                 owner_id = fallback_user_id
             if info_type in allowed_type_set and content:
-                records.append((owner_id, info_type, content))
+                records.append((owner_id, info_type, content, item))
         if records:
             return records
 
-    return [
-        (fallback_user_id, info_type, content)
+    legacy_records = [
+        (fallback_user_id, info_type, content, {})
         for info_type, content in _parse_important_info_entries(raw, allowed_types)
     ]
+    if not legacy_records:
+        preview = raw.replace("\n", " ")[:200]
+        raise ValueError(f"重要信息返回格式无法解析: {preview}")
+    return legacy_records
 
 
 
@@ -883,26 +889,8 @@ class MemoryManager:
             allowed_user_ids=allowed_user_ids,
         )
 
-        normalized = re.sub(r"^```(?:json)?\s*|\s*```$", "", result.strip(), flags=re.IGNORECASE)
-        try:
-            empty_payload = json.loads(normalized)
-        except json.JSONDecodeError:
-            empty_payload = None
-        if empty_payload == [] or (isinstance(empty_payload, dict) and empty_payload.get("items") == []):
-            return []
-
-        if not entries:
-            preview = result.replace("\n", " ")[:200]
-            raise ValueError(f"重要信息返回格式无法解析: {preview}")
-        payload=empty_payload.get("items",[]) if isinstance(empty_payload,dict) else empty_payload
-        annotations={}
-        if isinstance(payload,list):
-            for item in payload:
-                if isinstance(item,dict):
-                    annotations[(str(item.get("type") or item.get("info_type") or ""),str(item.get("content") or ""))]=item
         records=[]
-        for owner,kind,content in entries:
-            item=annotations.get((kind,content),{})
+        for owner, kind, content, item in entries:
             support=item.get("source_ids") or []
             if not isinstance(support,list) or any(type(mid) is not int or mid not in valid_sources for mid in support):
                 raise ValueError("事实来源不在本批可验证消息中")
