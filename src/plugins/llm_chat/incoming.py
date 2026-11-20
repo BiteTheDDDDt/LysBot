@@ -30,16 +30,18 @@ class ResolvedIncomingMessage:
     plain_text: str
     response_text: Optional[str] = None
     context_blocks: list[str] = field(default_factory=list)
-    direct_image_urls: list[str] = field(default_factory=list)
-    context_image_urls: list[str] = field(default_factory=list)
+    direct_image_urls: list[str | None] = field(default_factory=list)
+    context_image_urls: list[str | None] = field(default_factory=list)
     unavailable_images: bool = False
     faces: list[str] = field(default_factory=list)
 
     @property
+    def image_slots(self) -> list[str | None]:
+        return [*self.direct_image_urls, *self.context_image_urls]
+
+    @property
     def image_urls(self) -> list[str]:
-        return list(
-            dict.fromkeys([*self.direct_image_urls, *self.context_image_urls])
-        )
+        return list(dict.fromkeys(url for url in self.image_slots if url))
 
     def compose(self, plain_text: Optional[str] = None) -> str:
         current_text = self.plain_text if plain_text is None else plain_text
@@ -267,7 +269,7 @@ async def _render_forward_payload(
     budget: _ExpansionBudget,
     *,
     depth: int,
-) -> tuple[str, list[str]]:
+) -> tuple[str, list[str | None]]:
     nodes = _extract_forward_nodes(payload)
     if not nodes:
         return "", []
@@ -282,7 +284,7 @@ async def _render_forward_payload(
         return await _render_message_value(bot, nodes, budget, depth=depth)
 
     lines: list[str] = []
-    image_urls: list[str] = []
+    image_urls: list[str | None] = []
     for node in nodes[:budget.nodes_left]:
         seg_type, seg_data = segment_type_and_data(node)
         node_data = seg_data if seg_type == "node" else node
@@ -336,7 +338,7 @@ async def _render_message_value(
     budget: _ExpansionBudget,
     *,
     depth: int,
-) -> tuple[str, list[str]]:
+) -> tuple[str, list[str | None]]:
     if isinstance(message, str):
         if "[CQ:" in message:
             try:
@@ -357,7 +359,7 @@ async def _render_message_value(
         return budget.take_text(str(message or "")), []
 
     parts: list[str] = []
-    image_urls: list[str] = []
+    image_urls: list[str | None] = []
     for segment in segments:
         if budget.chars_left <= 0:
             break
@@ -370,9 +372,7 @@ async def _render_message_value(
             parts.append(budget.take_text(await _render_mention(bot, data, budget)))
         elif seg_type == "image":
             parts.append(budget.take_text("[图片]"))
-            url = budget.take_image(_image_url_from_data(data))
-            if url:
-                image_urls.append(url)
+            image_urls.append(budget.take_image(_image_url_from_data(data)))
         elif seg_type == "face":
             face_id = str(data.get("id") or data.get("emoji_id") or "")
             face_name = FACE_EMOJI_MAP.get(face_id, f"表情{face_id}")
@@ -459,7 +459,7 @@ async def _resolve_reply_context(
     bot: Bot,
     event: MessageEvent,
     budget: _ExpansionBudget,
-) -> tuple[Optional[str], list[str]]:
+) -> tuple[Optional[str], list[str | None]]:
     reply_info = getattr(event, "reply", None)
     reply_id = None
 
@@ -509,9 +509,9 @@ async def _resolve_forward_contexts(
     bot: Bot,
     event: MessageEvent,
     budget: _ExpansionBudget,
-) -> tuple[list[str], list[str]]:
+) -> tuple[list[str], list[str | None]]:
     blocks: list[str] = []
-    image_urls: list[str] = []
+    image_urls: list[str | None] = []
 
     for segment in as_segment_list(getattr(event, "message", None)):
         seg_type, data = segment_type_and_data(segment)
@@ -546,7 +546,7 @@ async def _resolve_forward_contexts(
             if not is_forward:
                 continue
             rendered = ""
-            nested_images: list[str] = []
+            nested_images: list[str | None] = []
             message_id = getattr(event, "message_id", None)
             if message_id is not None:
                 try:
@@ -599,10 +599,6 @@ async def resolve_incoming_message(
     )
     plain_text, response_text = await _render_current_text(bot, event, budget)
     direct_images = await get_images_from_message(event)
-    unavailable_direct = any(
-        seg_type == "image" and not _image_url_from_data(data)
-        for seg_type, data in map(segment_type_and_data, as_segment_list(event.message))
-    )
     result = ResolvedIncomingMessage(
         plain_text=plain_text,
         response_text=response_text,
@@ -612,7 +608,7 @@ async def resolve_incoming_message(
         ],
         direct_image_urls=direct_images,
         context_image_urls=[*reply_images, *forward_images],
-        unavailable_images=budget.unavailable_images or unavailable_direct,
+        unavailable_images=budget.unavailable_images or None in direct_images,
         faces=await get_faces_from_message(event),
     )
     try:
@@ -622,16 +618,13 @@ async def resolve_incoming_message(
     return result
 
 
-async def get_images_from_message(event: MessageEvent) -> list[str]:
-    """从消息中提取图片URL"""
+async def get_images_from_message(event: MessageEvent) -> list[str | None]:
+    """Read attachment URLs in OneBot order, including unavailable slots."""
     images = []
     for seg in as_segment_list(event.message):
         seg_type, data = segment_type_and_data(seg)
         if seg_type == "image":
-            url = _image_url_from_data(data)
-            # 过滤无效URL（QQ内置表情等）
-            if url:
-                images.append(url)
+            images.append(_image_url_from_data(data) or None)
     return images
 
 

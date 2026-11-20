@@ -219,7 +219,7 @@ class ImageReferenceTests(unittest.IsolatedAsyncioTestCase):
             plain_text="参考这个图修改", context_image_urls=["https://test/quoted.png"],
         )
         chat._capture_incoming_images(event, [("https://test/quoted.png", ENCODED)])
-        async def inspect_context(*args):
+        async def inspect_context(*args, **kwargs):
             context = tools._image_context.get()
             self.assertEqual(len(context["current_reference_ids"]), 1)
             ref = context["references"][context["current_reference_ids"][0]]
@@ -268,6 +268,47 @@ class ImageReferenceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("[图片引用:img_", user_memory)
         self.assertNotIn(ENCODED, user_memory)
         self.assertIsNone(tools._image_context.get())
+
+    async def test_private_images_keep_positions_and_report_total_failure(self):
+        class PrivateEvent(SimpleNamespace):
+            def get_plaintext(self):
+                return self.message.extract_plain_text()
+
+        first, second = "https://test/first.png", "https://test/second.png"
+        second_image = base64.b64encode(JPEG).decode()
+        cases = [
+            ([(second, second_image)], ["第二张的文字"], True),
+            ([(first, ENCODED), (second, second_image)], [RuntimeError, "第二张的文字"], True),
+            ([(second, second_image)], [""], False),
+            ([], [], False),
+        ]
+        for downloaded, descriptions, succeeds in cases:
+            with self.subTest(downloaded=len(downloaded), descriptions=descriptions):
+                event = PrivateEvent(self_id=999, user_id=42, message_id=78, to_me=True,
+                                     message=Message("第二张写了什么？" if succeeds else "")
+                                     + MessageSegment.image(first) + MessageSegment.image(second))
+                bot = SimpleNamespace(send=AsyncMock(return_value={"message_id": 80}))
+                with (
+                    patch.object(chat, "PrivateMessageEvent", PrivateEvent),
+                    patch.object(chat, "download_images_as_base64", AsyncMock(return_value=downloaded)),
+                    patch.object(chat.model_manager, "describe_image", AsyncMock(side_effect=descriptions)),
+                    patch.object(chat.model_manager, "run_turn", AsyncMock(return_value="测试答复")) as run,
+                    patch.object(chat.memory_manager, "get_history", AsyncMock(return_value=[])),
+                    patch.object(chat.memory_manager, "get_session_model", return_value="test"),
+                    patch.object(chat.memory_manager, "add_message", AsyncMock()),
+                    patch.object(chat, "build_context_messages", AsyncMock(return_value=[])) as build,
+                    patch.object(chat, "plan_chat_action", AsyncMock(return_value=PlannerDecision())),
+                ):
+                    await chat._process_chat(bot, event)
+                if succeeds:
+                    run.assert_awaited_once()
+                    user_content = build.await_args.kwargs["user_content"]
+                    self.assertIn("图片1: 未能读取\n图片2:", user_content)
+                    self.assertIn("第二张的文字", user_content.splitlines()[1])
+                    bot.send.assert_awaited_once()
+                else:
+                    run.assert_not_awaited()
+                    bot.send.assert_awaited_once_with(event, chat.PRIVATE_IMAGE_FAILURE)
 
     async def test_aggregation_retains_both_owners_originals_and_requires_selection(self):
         pending = []

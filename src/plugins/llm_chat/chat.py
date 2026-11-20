@@ -43,6 +43,28 @@ from .incoming import (
 from .image_references import ImageReference, image_reference_store, reference_marker
 
 
+REQUEST_FAILURE = "刚才没处理成功，可以再发一次。"
+PRIVATE_IMAGE_FAILURE = "这次没能读到图片，可以重新发一下。"
+
+
+async def _send_request_notice(bot, event, group_id, text):
+    ensure_send_allowed(group_id)
+    try:
+        await bot.send(event, text)
+    except Exception as error:
+        logger.warning(f"[聊天反馈] 发送失败 group={group_id}: {type(error).__name__}")
+
+
+async def _plan_chat_request(bot, event, *, group_id, is_direct, **kwargs) -> Optional[PlannerDecision]:
+    try:
+        return await plan_chat_action(group_id=group_id, is_direct=is_direct, **kwargs)
+    except Exception as error:
+        logger.warning(f"[聊天规划] 本轮结束 group={group_id}: {type(error).__name__}")
+        if is_direct:
+            await _send_request_notice(bot, event, group_id, REQUEST_FAILURE)
+        return None
+
+
 async def _send_research_progress(bot, event, text, user_id, group_id):
     ensure_send_allowed(group_id)
     receipt = await _deliver_agent_reply(text, str(text), lambda: bot.send(event, str(text)), bot=bot, group_id=group_id)
@@ -139,7 +161,8 @@ async def _resume_after_planner_wait(
             direct, elsewhere = _group_message_direction(event, event.get_plaintext())
             if not direct and not _eligible_event_followup(event, elsewhere):
                 return
-            decision = await plan_chat_action(
+            decision = await _plan_chat_request(
+                bot, event,
                 session_id=f"group_{group_id}",
                 group_id=group_id,
                 current_message=message,
@@ -153,6 +176,8 @@ async def _resume_after_planner_wait(
                 faces=faces,
                 default_action="reply" if direct else "silent",
             )
+            if decision is None:
+                return
             if decision.action == "wait":
                 continue
             if not decision.should_continue:
@@ -406,6 +431,55 @@ async def _finalize_immediate_tool_turn(
     )
 
 
+async def _finish_response_turn(bot, event, user_id, group_id, *, direct, response,
+                                reply_policy, planner_decision, planned_meme):
+    """Deliver the planned reply and record whichever parts were sent."""
+    reply_policy = getattr(response, "reply_policy", None) or reply_policy
+    text = clean_response(response, preserve_paragraphs=reply_policy.detailed)
+    model_spec = getattr(response, "model_spec", None)
+
+    async def send_text(value, payload):
+        ensure_send_allowed(group_id)
+        await _deliver_agent_reply(response, value, lambda: bot.send(event, payload),
+                                   bot=bot, group_id=group_id)
+
+    async def send_media_followup(value):
+        await send_text(value, QQAddressing().text(value))
+
+    if await _finalize_immediate_tool_turn(user_id, group_id, followup_text=text,
+                                           send_followup=send_media_followup, model_spec=model_spec):
+        return
+
+    sent_turn = await send_response_turn(text=text, decision=planner_decision, planned_meme=planned_meme,
+                                         send_text=send_text, reply_policy=reply_policy)
+    if not sent_turn.sent_anything:
+        return
+    try:
+        if group_id:
+            from . import followups
+            proactive_manager.mark_just_spoke(group_id)
+            followups.answered(group_id, sent_turn.text_for_memory, direct=direct,
+                               closed=bool(planner_decision and planner_decision.action == "close"))
+        history_text = _build_assistant_history_text(sent_turn.text_for_memory, sent_turn.sent_meme)
+        await memory_manager.add_message(0 if group_id else user_id, "assistant", history_text, group_id,
+                                         model_spec=model_spec if sent_turn.text_for_memory else None)
+    except Exception as error:
+        logger.error(f"回复已发送，后续记忆记录失败: {error}")
+
+
+async def _report_response_failure(bot, event, user_id, group_id, *, direct, error):
+    if isinstance(error, DeliveryUncertain):
+        logger.warning(f"[agent_delivery] {error}")
+        return
+    if await _finalize_immediate_tool_turn(user_id, group_id):
+        logger.warning(f"模型后处理失败，但本轮即时媒体已经发送: {error}")
+        return
+    logger.error(f"模型调用或投递失败: {error}")
+    if direct:
+        notice = error.user_message if isinstance(error, ModelTurnTimeout) else REQUEST_FAILURE
+        await _send_request_notice(bot, event, group_id, notice)
+
+
 def _drop_current_turn_from_history(
     history: list[LLMMessage],
     current_turns: list[tuple[str, str, bool]],
@@ -617,9 +691,14 @@ def _capture_incoming_images(event: MessageEvent, downloaded: list[tuple[str, st
     name = object_value(sender, "card", "") or object_value(sender, "nickname", "") or str(event.user_id)
     resolved = getattr(event, "_llm_resolved_incoming_message", None)
     quoted_urls = set(resolved.context_image_urls) if resolved else set()
+    private_positions = {}
+    if resolved and not getattr(event, "group_id", None):
+        for index, url in enumerate(resolved.image_slots, 1):
+            private_positions.setdefault(url, index)
     references = []
     previous = {ref.base64: ref for ref in getattr(event, "_llm_image_references", [])}
     for index, (url, encoded) in enumerate(downloaded, 1):
+        index = private_positions.get(url, index)
         source = "引用/转发图片" if url in quoted_urls else "附图"
         label = previous[encoded].label if encoded in previous else (
             f"{name}(QQ:{event.user_id}) 消息{getattr(event, 'message_id', '?')} {source}{index}"
@@ -963,7 +1042,7 @@ class PreparedIncomingMessage:
     resolved: ResolvedIncomingMessage
     plain_text: str
     message: str
-    image_urls: list[str]
+    image_slots: list[str | None]
     images_base64: list[str]
     faces: list[str]
 
@@ -980,11 +1059,12 @@ async def prepare_incoming_message(bot: Bot, event: MessageEvent) -> PreparedInc
     ensure_current_session()
     _capture_incoming_images(event, downloaded)
 
+    encoded_by_url = dict(downloaded)
     return PreparedIncomingMessage(
         resolved=resolved,
         plain_text=plain_text,
         message=resolved.compose(plain_text),
-        image_urls=resolved.image_urls,
+        image_slots=[encoded_by_url.get(url) for url in resolved.image_slots],
         images_base64=[encoded for _, encoded in downloaded],
         faces=resolved.faces,
     )
@@ -1050,19 +1130,21 @@ async def _process_chat(bot: Bot, event: MessageEvent):
     images_base64 = prepared.images_base64
     faces = prepared.faces
 
+    if prepared.image_slots and not images_base64:
+        await _send_request_notice(bot, event, None, PRIVATE_IMAGE_FAILURE)
+        return
+
     # 如果没有消息内容，设置默认
     if not message:
         if not images_base64 and not faces:
-            if prepared.image_urls:
-                logger.info(f"[私聊图片下载] 图片全部失败且无文本/表情，忽略消息: user_id={user_id}")
-                return
             await chat_matcher.finish("你好！有什么我可以帮助你的吗？")
         if images_base64:
-            message = "请描述这张图片"
+            message = "请描述收到的图片"
         elif faces:
             message = " "
 
-    planner_decision = await plan_chat_action(
+    planner_decision = await _plan_chat_request(
+        bot, event,
         session_id=memory_manager._get_session_id(user_id, None),
         group_id=0,
         current_message=message,
@@ -1072,6 +1154,8 @@ async def _process_chat(bot: Bot, event: MessageEvent):
         faces=faces,
         default_action="reply",
     )
+    if planner_decision is None:
+        return
     # 私聊必须回应；Planner 在这里负责媒体/召回意图，不负责让本轮沉默。
     if not planner_decision.should_continue:
         planner_decision.action = "reply"
@@ -1082,13 +1166,15 @@ async def _process_chat(bot: Bot, event: MessageEvent):
         images_base64,
         faces,
         planner_decision,
+        image_slots=prepared.image_slots or None,
     )
 
 
 @serialized_turn(lambda bot, event, *args, **kwargs: session_key(event.user_id, getattr(event, "group_id", None)))
 async def handle_single_chat(bot: Bot, event: MessageEvent, message: str,
                               images_base64: list, faces: list,
-                              planner_decision: Optional[PlannerDecision] = None):
+                              planner_decision: Optional[PlannerDecision] = None, *,
+                              image_slots: list[str | None] | None = None):
     """处理单条聊天消息"""
     user_id = event.user_id
     group_id = event.group_id if isinstance(event, GroupMessageEvent) else None
@@ -1097,7 +1183,8 @@ async def handle_single_chat(bot: Bot, event: MessageEvent, message: str,
     if not direct and not _eligible_event_followup(event, _group_message_direction(event, event.get_plaintext())[1]):
         return
     if planner_decision is None:
-        planner_decision = await plan_chat_action(
+        planner_decision = await _plan_chat_request(
+            bot, event,
             session_id=session_key(user_id, group_id), group_id=group_id or 0,
             current_message=message, mode="passive", is_direct=direct,
             current_targets=_event_message_targets(event, message) if group_id else (),
@@ -1105,6 +1192,8 @@ async def handle_single_chat(bot: Bot, event: MessageEvent, message: str,
             has_images=bool(images_base64), faces=faces, default_action="reply" if direct else "silent",
             followup_context=followups.context(group_id) if not direct else "",
         )
+        if planner_decision is None:
+            return
         if group_id and (config.enable_reply_judge or not direct):
             if planner_decision.action == "wait":
                 _schedule_planner_wait(bot=bot,event=event,message=message,
@@ -1149,7 +1238,8 @@ async def handle_single_chat(bot: Bot, event: MessageEvent, message: str,
 
     try:
         await _do_handle_single_chat(
-            bot, event, message, images_base64, faces, user_id, group_id, planner_decision
+            bot, event, message, images_base64, faces, user_id, group_id, planner_decision,
+            image_slots=image_slots,
         )
     finally:
         # 清理工具上下文
@@ -1162,7 +1252,8 @@ async def handle_single_chat(bot: Bot, event: MessageEvent, message: str,
 async def _do_handle_single_chat(bot: Bot, event: MessageEvent, message: str,
                                   images_base64: list, faces: list, user_id: int,
                                   group_id: int = None,
-                                  planner_decision: Optional[PlannerDecision] = None):
+                                  planner_decision: Optional[PlannerDecision] = None, *,
+                                  image_slots: list[str | None] | None = None):
     """实际处理单条聊天消息的逻辑"""
     reply_policy = select_reply_policy(
         [current_request_text(event, message)], decision=planner_decision,
@@ -1195,42 +1286,45 @@ async def _do_handle_single_chat(bot: Bot, event: MessageEvent, message: str,
     user_images = images_base64 if images_base64 else None
     query_text = message
     caller = "chat:plain"
+    image_guidance = ""
 
     # 私聊图片需要在回复前识别，并把描述作为用户消息保存；群聊图片已在记录阶段识别。
     if images_base64 and not group_id:
         image_descriptions = []
-        for idx, img_b64 in enumerate(images_base64):
-            try:
-                desc = (await model_manager.describe_image(img_b64, session_id=sid)).strip()
-            except Exception as e:
-                logger.warning(f"[私聊图片识别] 失败，已忽略该图片: user_id={user_id}, index={idx}, error={e}")
-                continue
+        failed = []
+        descriptions_by_image = {}
+        references = {ref.base64: ref for ref in _current_image_references(event, images_base64)}
+        for index, img_b64 in enumerate(image_slots if image_slots is not None else images_base64, 1):
+            if img_b64 and img_b64 not in descriptions_by_image:
+                try:
+                    descriptions_by_image[img_b64] = (await model_manager.describe_image(img_b64, session_id=sid)).strip()
+                except Exception as error:
+                    logger.warning(f"[私聊图片识别] user_id={user_id} image={index}: {type(error).__name__}")
+                    descriptions_by_image[img_b64] = ""
+            desc = descriptions_by_image.get(img_b64)
             if desc:
-                image_descriptions.append(desc)
+                marker = reference_marker(references[img_b64]) if img_b64 in references else ""
+                image_descriptions.append(f"图片{index}: {marker} {desc}".strip())
             else:
-                logger.warning(f"[私聊图片识别] 空描述，已忽略: user_id={user_id}, index={idx}")
+                failed.append(index)
+                image_descriptions.append(f"图片{index}: 未能读取")
 
-        if not image_descriptions:
-            if not message or message == "请描述这张图片":
-                logger.info(f"[私聊图片识别] 图片全部失败且无文本，忽略消息: user_id={user_id}")
-                return
-            user_images = None
-            caller = "chat:plain"
-        else:
-            desc_text = "\n".join([f"图片{i+1}: {d}" for i, d in enumerate(image_descriptions)])
-            if message and message != "请描述这张图片":
-                user_content = f"{desc_text}\n\n用户消息: {message}"
-            else:
-                user_content = f"{desc_text}\n\n请根据图片内容回复用户"
-            query_text = user_content
-            user_images = None
-            caller = "chat:private_with_imgs"
+        if len(failed) == len(image_descriptions):
+            await _send_request_notice(bot, event, None, PRIVATE_IMAGE_FAILURE)
+            return
+        if failed:
+            image_guidance = "按原始图片编号回答可见内容，简短指出未能读取的图片编号。"
+        user_content = "\n".join(image_descriptions) + f"\n\n用户消息: {display_message}"
+        query_text = user_content
+        user_images = None
+        caller = "chat:private_with_imgs"
     elif images_base64 and group_id:
         caller = "chat:group_with_imgs"
 
-    references = _current_image_references(event, images_base64)
-    if references:
-        user_content += "\n" + _image_reference_text(references)
+    if group_id:
+        references = _current_image_references(event, images_base64)
+        if references:
+            user_content += "\n" + _image_reference_text(references)
 
     if isinstance(event, PrivateMessageEvent):
         await memory_manager.add_message(
@@ -1259,13 +1353,13 @@ async def _do_handle_single_chat(bot: Bot, event: MessageEvent, message: str,
         user_content=user_content,
         user_name=sender_name if isinstance(event, GroupMessageEvent) else None,
         user_images=user_images,
+        extra_system=image_guidance,
         reply_policy=reply_policy,
         planner_decision=planner_decision,
         planned_meme=planned_meme,
     )
 
-    # 调用模型
-    sent_turn = None
+    direct = not group_id or _group_message_direction(event, event.get_plaintext())[0]
     try:
         if planned_meme and is_meme_only(planner_decision):
             response_text = ""
@@ -1281,71 +1375,14 @@ async def _do_handle_single_chat(bot: Bot, event: MessageEvent, message: str,
                 required_tool=(planner_decision.required_tool if planner_decision else None),
                 media_followup=(planner_decision.media_followup if planner_decision else True),
             )
-        reply_policy = getattr(response_text, "reply_policy", None) or reply_policy
-
-        cleaned_response = clean_response(response_text, preserve_paragraphs=reply_policy.detailed)
-
-        async def send_media_followup(text: str) -> None:
-            ensure_send_allowed(group_id)
-            await _deliver_agent_reply(response_text,text,lambda:bot.send(event,QQAddressing().text(text)), bot=bot, group_id=group_id)
-
-        # 媒体已由工具发送；Planner 可选择只发媒体或再补一句文字。
-        if await _finalize_immediate_tool_turn(
-            user_id,
-            group_id,
-            followup_text=cleaned_response,
-            send_followup=send_media_followup,
-            model_spec=getattr(response_text, "model_spec", None),
-        ):
-            return
-
-        async def send_text_reply(text: str, payload: Message | str) -> None:
-            ensure_send_allowed(group_id)
-            await _deliver_agent_reply(response_text,text,lambda:bot.send(event,payload), bot=bot, group_id=group_id)
-
-        sent_turn = await send_response_turn(
-            text=cleaned_response,
-            decision=planner_decision,
-            planned_meme=planned_meme,
-            send_text=send_text_reply,
-            reply_policy=reply_policy,
+        await _finish_response_turn(
+            bot, event, user_id, group_id, direct=direct, response=response_text,
+            reply_policy=reply_policy, planner_decision=planner_decision, planned_meme=planned_meme,
         )
-        if not sent_turn.sent_anything:
-            return
-
-        # 记录最近发言时间（用于主动发言冷却和情感归因）
-        if group_id:
-            proactive_manager.mark_just_spoke(group_id)
-            from . import followups
-            followups.answered(group_id, sent_turn.text_for_memory,
-                               direct=_group_message_direction(event, event.get_plaintext())[0],
-                               closed=bool(planner_decision and planner_decision.action == "close"))
-
-        # 历史占位：让记忆里保留"我具体发了一张什么表情包"
-        history_text = _build_assistant_history_text(sent_turn.text_for_memory, sent_turn.sent_meme)
-        await memory_manager.add_message(0 if group_id else user_id, "assistant", history_text, group_id,
-                                         model_spec=getattr(response_text, "model_spec", None) if sent_turn.text_for_memory else None)
-
     except FinishedException:
         raise
-    except DeliveryUncertain as e:
-        logger.warning(f"[agent_delivery] {e}")
-        return
-    except Exception as e:
-        if sent_turn and sent_turn.sent_anything:
-            logger.error(f"回复已发送，后续记忆记录失败: {e}")
-            return
-        if await _finalize_immediate_tool_turn(user_id, group_id):
-            logger.warning(f"模型后处理失败，但本轮即时媒体已经发送: {e}")
-            return
-        logger.error(f"模型调用失败: {e}")
-        ensure_send_allowed(group_id)
-        try:
-            await bot.send(event, e.user_message if isinstance(e, ModelTurnTimeout) else "刚才没处理成功，稍后再试一下。")
-        except Exception:
-            pass
-        return
-
+    except Exception as error:
+        await _report_response_failure(bot, event, user_id, group_id, direct=direct, error=error)
 
 
 @serialized_turn(lambda bot, group_id, *args, **kwargs: f"group_{group_id}")
@@ -1367,7 +1404,8 @@ async def handle_merged_chat(bot: Bot, group_id: int, pending_messages: list[Pen
         if not pending_messages:
             return
     combined = "\n".join(f"【群员-{format_sender_name(pm.sender_name)} QQ:{pm.user_id}】 {pm.message}" for pm in pending_messages)
-    decision = await plan_chat_action(
+    decision = await _plan_chat_request(
+        bot, pending_messages[0].event,
         session_id=f"group_{group_id}", group_id=group_id, current_message=combined,
         mode="passive", is_direct=direct,
         current_targets=tuple(target for pm in pending_messages
@@ -1377,6 +1415,8 @@ async def handle_merged_chat(bot: Bot, group_id: int, pending_messages: list[Pen
         has_images=any(pm.images_base64 for pm in pending_messages),
         faces=[face for pm in pending_messages for face in pm.faces], default_action="reply" if direct else "silent",
     )
+    if decision is None:
+        return
     ensure_send_allowed(group_id)
     if (config.enable_reply_judge or not direct) and decision.action == "wait":
         loop = asyncio.get_running_loop()
@@ -1544,8 +1584,8 @@ async def _do_handle_merged_chat(
         planned_meme=planned_meme,
     )
 
-    # 调用模型
-    sent_turn = None
+    event = pending_messages[0].event
+    direct = any(pm.directed_to_bot for pm in pending_messages)
     try:
         # 注：群聊图片描述已由 record_group_message 在每条消息保存时调用 describe_image
         # 写入历史；此处历史已包含描述，无需重复识别（重复会浪费 vision token + 增加延迟）。
@@ -1564,70 +1604,9 @@ async def _do_handle_merged_chat(
                 required_tool=(planner_decision.required_tool if planner_decision else None),
                 media_followup=(planner_decision.media_followup if planner_decision else True),
             )
-        reply_policy = getattr(response_text, "reply_policy", None) or reply_policy
-
-        cleaned_response = clean_response(response_text, preserve_paragraphs=reply_policy.detailed)
-
-        first_msg = pending_messages[0]
-
-        async def send_media_followup(text: str) -> None:
-            ensure_send_allowed(group_id)
-            await _deliver_agent_reply(response_text,text,lambda:bot.send(first_msg.event,QQAddressing().text(text)), bot=bot, group_id=group_id)
-
-        # 图片或语音已发送；只有媒体后的 text part 才会得到收尾文字。
-        if await _finalize_immediate_tool_turn(
-            primary_user_id,
-            group_id,
-            followup_text=cleaned_response,
-            send_followup=send_media_followup,
-            model_spec=getattr(response_text, "model_spec", None),
-        ):
-            return
-
-        # 发送回复（使用 bot.send 而不是 finish，因为不是在 matcher 中）
-        async def send_text_reply(text: str, payload: Message | str) -> None:
-            ensure_send_allowed(group_id)
-            await _deliver_agent_reply(response_text,text,lambda:bot.send(first_msg.event,payload), bot=bot, group_id=group_id)
-
-        sent_turn = await send_response_turn(
-            text=cleaned_response,
-            decision=planner_decision,
-            planned_meme=planned_meme,
-            send_text=send_text_reply,
-            reply_policy=reply_policy,
+        await _finish_response_turn(
+            bot, event, primary_user_id, group_id, direct=direct, response=response_text,
+            reply_policy=reply_policy, planner_decision=planner_decision, planned_meme=planned_meme,
         )
-        if not sent_turn.sent_anything:
-            return
-
-        # 记录最近发言时间（用于主动发言冷却和情感归因）
-        proactive_manager.mark_just_spoke(group_id)
-
-        # 保存助手回复
-        from . import followups
-        followups.answered(group_id, sent_turn.text_for_memory,
-                           direct=any(pm.directed_to_bot for pm in pending_messages),
-                           closed=bool(planner_decision and planner_decision.action == "close"))
-        history_text = _build_assistant_history_text(sent_turn.text_for_memory, sent_turn.sent_meme)
-        await memory_manager.add_message(0, "assistant", history_text, group_id,
-                                         model_spec=getattr(response_text, "model_spec", None) if sent_turn.text_for_memory else None)
-
-    except DeliveryUncertain as e:
-        logger.warning(f"[agent_delivery] {e}")
-        return
-    except Exception as e:
-        if sent_turn and sent_turn.sent_anything:
-            logger.error(f"回复已发送，后续记忆记录失败: {e}")
-            return
-        if await _finalize_immediate_tool_turn(primary_user_id, group_id):
-            logger.warning(f"[消息聚合] 模型后处理失败，但本轮即时媒体已经发送: {e}")
-            return
-        if isinstance(e, ModelTurnTimeout):
-            logger.warning(f"[消息聚合] {e}")
-        else:
-            logger.exception(f"[消息聚合] 模型调用失败: {e}")
-        ensure_send_allowed(group_id)
-        try:
-            await bot.send(pending_messages[0].event, e.user_message if isinstance(e, ModelTurnTimeout) else "刚才没处理成功，稍后再试一下。")
-        except Exception:
-            pass
-        return
+    except Exception as error:
+        await _report_response_failure(bot, event, primary_user_id, group_id, direct=direct, error=error)
