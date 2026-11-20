@@ -20,6 +20,16 @@ from src.plugins.llm_chat.working_context import restore_context
 from src.plugins.llm_chat import tools
 
 
+class MemoryCommandTests(unittest.TestCase):
+    def test_no_chat_command_for_clearing_session_memory(self):
+        from nonebot.rule import TrieRule
+        from src.plugins.llm_chat import commands  # register the chat commands
+
+        self.assertIn("/memory", TrieRule.prefix)
+        for command in ("/clear", "/清空", "/清除记忆"):
+            self.assertNotIn(command, TrieRule.prefix)
+
+
 class MemoryChangesTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.tmp = tempfile.TemporaryDirectory()

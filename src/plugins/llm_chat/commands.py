@@ -205,35 +205,6 @@ async def handle_model(event: MessageEvent, args: Message = CommandArg()):
         await model_cmd.finish(str(e))
 
 
-# 清空记忆命令 - 仅超级用户
-clear_cmd = on_command("clear", aliases={"清空", "清除记忆"}, priority=1, block=True, permission=SUPERUSER)
-
-
-@clear_cmd.handle()
-async def handle_clear(event: MessageEvent, args: Message = CommandArg()):
-    """清空对话历史"""
-    user_id = event.user_id
-    group_id = event.group_id if isinstance(event, GroupMessageEvent) else None
-
-    mode = args.extract_plain_text().strip().lower()
-    if mode not in {"", "all confirm", "全部 确认"}:
-        await clear_cmd.finish("/清空 只重置短期对话。删除可召回的历史、摘要和人物记忆请发送 /清空 全部 确认；该操作不可撤销。")
-    full = mode in {"all confirm", "全部 确认"}
-    from .conversation import invalidate
-    if group_id:
-        from .chat import cancel_pending_group_turns
-        cancel_pending_group_turns(group_id)
-    else:
-        invalidate(f"user_{user_id}")
-    await memory_manager.clear_history(0 if group_id else user_id, group_id, full=full)
-    from .image_references import image_reference_store
-    image_reference_store.clear(f"group_{group_id}" if group_id else f"user_{user_id}")
-
-    scope = "群聊" if group_id else "私聊"
-    detail = "历史、摘要和人物记忆" if full else "短期对话，历史摘要和人物记忆保留"
-    await clear_cmd.finish(f"已清空{scope}的{detail}")
-
-
 # 帮助命令 - 仅超级用户
 help_cmd = on_command("help", aliases={"帮助"}, priority=1, block=True, permission=SUPERUSER)
 
@@ -258,7 +229,6 @@ async def handle_help(event: MessageEvent):
 /help - 显示此帮助
 /dczx [主题] - 调查当前对话里的说法
 /model [模型名] - 切换/查看模型 🔒
-/clear - 清空对话历史 🔒
 /status - 查看当前状态 🔒
 /summary - 查看对话统计/摘要 🔒
 

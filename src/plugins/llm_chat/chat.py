@@ -33,7 +33,7 @@ from .turns import is_meme_only, prepare_planned_meme, send_response_turn
 from .utils import clean_response
 from .conversation import (
     TurnSuperseded, current_generation, ensure_current_session, ensure_send_allowed,
-    invalidate, serialized_turn, session_key, session_scope,
+    serialized_turn, session_key, session_scope,
 )
 from .agent_runner import DeliveryUncertain, deliver_reply as _deliver_agent_reply
 from .incoming import (
@@ -588,16 +588,6 @@ async def delayed_process(bot: Bot, group_id: int):
             buffer.task = None
         if aggregation_buffers.get(group_id) is buffer and not buffer.messages:
             aggregation_buffers.pop(group_id, None)
-
-
-def cancel_pending_group_turns(group_id: int) -> None:
-    invalidate(f"group_{group_id}")
-    _cancel_planner_wait(group_id)
-    proactive_manager.cancel_wait(group_id)
-    buffer = aggregation_buffers.get(group_id)
-    if buffer:
-        buffer.messages.clear()
-        buffer.wakeup.set()
 
 
 async def close_chat_tasks() -> None:
