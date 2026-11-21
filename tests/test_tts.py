@@ -233,10 +233,10 @@ class GeminiTTSTests(unittest.IsolatedAsyncioTestCase):
     def test_voice_tool_instructions_cover_implicit_audio_requests(self):
         description = tools.VOICE_TOOL["function"]["description"]
 
-        self.assertIn("想听你的声音", description)
-        self.assertIn("哄我睡觉", description)
-        self.assertIn("普通的‘你说说’", description)
-        self.assertIn("不要求用户必须说出“生成语音”", TOOL_USAGE_PROMPT)
+        self.assertIn("是否想收到合成语音", description)
+        self.assertIn("用声音演绎当前的梗", description)
+        self.assertIn("已有录音、原曲或视频", description)
+        self.assertIn("本轮用语音完成请求", TOOL_USAGE_PROMPT)
 
 
 if __name__ == "__main__":

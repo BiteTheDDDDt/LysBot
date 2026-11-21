@@ -326,14 +326,13 @@ class CLIProxyAPIImageGenerationTests(unittest.IsolatedAsyncioTestCase):
             "properties"
         ]["prompt"]["description"]
 
-        self.assertIn("宝宝我要看你的自拍", description)
-        self.assertIn("不要回答自己没有自拍或照片", description)
-        self.assertIn("仅讨论图片", description)
+        self.assertIn("用户希望收到新画面时使用", description)
+        self.assertIn("包括要看当前角色", description)
+        self.assertIn("讨论已有图片或询问能力时用文字回复", description)
         self.assertIn("当前人设", prompt_description)
         from src.plugins.llm_chat.config import PERSONA
         self.assertIn("薄荷绿色晶体头发", PERSONA.appearance)
-        self.assertIn("宝宝我要看你的自拍", TOOL_USAGE_PROMPT)
-        self.assertIn("不要求用户必须说出“生成图片”", TOOL_USAGE_PROMPT)
+        self.assertIn("描绘当前角色时使用人设外貌", TOOL_USAGE_PROMPT)
 
 
 if __name__ == "__main__":
