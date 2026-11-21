@@ -212,6 +212,7 @@ async def _handle_poke_chat(bot: Bot, user_id: int, group_id: int = None):
         sent_turn = await send_response_turn(
             text=cleaned_response, decision=decision, planned_meme=planned_meme,
             reply_policy=reply_policy, send_text=send_text,
+            group_chat=bool(group_id) and not (image_was_sent_this_round() or voice_was_sent_this_round()),
             allow_addressing=bool(group_id) and not (image_was_sent_this_round() or voice_was_sent_this_round()),
         )
         cleaned_response = sent_turn.text_for_memory

@@ -553,7 +553,7 @@ class ProactiveManager:
                             text=response,
                             decision=planner_decision,
                             planned_meme=planned_meme,
-                            send_text=send_text_reply,
+                            send_text=send_text_reply, group_chat=True,
                             reply_policy=getattr(generated_response, "reply_policy", None) or PROACTIVE_REPLY,
                         )
                         if not sent_turn.sent_anything:

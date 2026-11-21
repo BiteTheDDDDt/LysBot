@@ -451,7 +451,7 @@ async def send_picked_meme(planned: Optional[Dict[str, Any]], allow_reply: bool 
         ensure_send_allowed(group_id)
         send_result = await bot.send_group_msg(
             group_id=group_id,
-            message=addressing.prefix(skip_mentions=skip_mentions) + MessageSegment.image(raw),
+            message=addressing.prefix(include_reply=False, skip_mentions=skip_mentions) + MessageSegment.image(raw),
         )
     except Exception as e:
         logger.error(f"[send_meme] 发送失败 id={meme_id}: {e}")

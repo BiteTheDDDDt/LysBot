@@ -456,7 +456,7 @@ async def _finish_response_turn(bot, event, user_id, group_id, *, direct, respon
         return
 
     sent_turn = await send_response_turn(text=text, decision=planner_decision, planned_meme=planned_meme,
-                                         send_text=send_text, reply_policy=reply_policy)
+                                         send_text=send_text, reply_policy=reply_policy, group_chat=bool(group_id))
     if not sent_turn.sent_anything:
         return
     try:

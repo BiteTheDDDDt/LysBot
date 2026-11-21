@@ -185,7 +185,7 @@ class RoleSeparationTests(unittest.IsolatedAsyncioTestCase):
                 current_run.get().reply_mode = "sentence"
                 return models.ChatResponse("简短回答即可")
             prompt = "\n".join(m.content for m in messages if m.role == "system")
-            self.assertIn("通常10—30字", prompt)
+            self.assertIn("通常一句自然短话", prompt)
             self.assertNotIn("500个字符", prompt)
             self.assertEqual(prompt.count("【本轮回复规则"), 1)
             return models.ChatResponse("好了")
@@ -239,7 +239,7 @@ class RoleSeparationTests(unittest.IsolatedAsyncioTestCase):
                     current_run.get().reply_mode = "detailed"
                     return models.ChatResponse("三个机制搭配")
                 prompt = "\n".join(m.content for m in messages if m.role == "system")
-                self.assertIn("500个字符" if policy == SHORT_REPLY else "一两句自然短话", prompt)
+                self.assertIn("500个字符" if policy == SHORT_REPLY else "通常一句自然短话", prompt)
                 return models.ChatResponse("第一种搭配。\n第二种搭配。\n第三种搭配。")
             with patch.object(manager, "_chat_impl", side_effect=call):
                 result = await manager.run_turn([models.Message("user", "来几个搭配")], reply_policy=policy)

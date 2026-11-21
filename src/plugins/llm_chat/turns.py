@@ -73,7 +73,7 @@ def _first_nonempty_text(text: str) -> str:
     return re.sub(r"\s+", " ", text or "").strip()
 
 
-def split_two_texts(text: str, *, preserve_paragraphs: bool = False) -> list[str]:
+def split_two_texts(text: str, *, preserve_paragraphs: bool = False, sentence_only: bool = False) -> list[str]:
     """Split natural language into at most two short messages."""
     raw = (text or "").strip()
     clean = _first_nonempty_text(raw)
@@ -98,7 +98,7 @@ def split_two_texts(text: str, *, preserve_paragraphs: bool = False) -> list[str
 
     sentence_parts = []
     start = 0
-    for match in re.finditer(r"[。！？!?]+", clean):
+    for match in re.finditer(r"[。！？]+|[.!?]+(?=\s|$)", clean):
         end = match.end()
         part = clean[start:end].strip()
         if part:
@@ -109,6 +109,9 @@ def split_two_texts(text: str, *, preserve_paragraphs: bool = False) -> list[str
         sentence_parts.append(tail)
     if len(sentence_parts) >= 2:
         return cap_two(sentence_parts)
+
+    if sentence_only:
+        return [raw]
 
     soft_parts = [p.strip() for p in re.split(r"[，,；;]\s*", clean, maxsplit=1) if p.strip()]
     if len(soft_parts) >= 2 and all(len(p) <= 60 for p in soft_parts[:2]):
@@ -123,6 +126,7 @@ def build_turn_items(
     decision: Optional[PlannerDecision],
     planned_meme: Optional[dict],
     reply_policy: ReplyPolicy = SHORT_REPLY,
+    group_chat: bool = False,
 ) -> list[tuple[str, str | dict]]:
     """Return ordered ('text'|'meme', payload) items, capped at two."""
     if decision:
@@ -138,6 +142,13 @@ def build_turn_items(
         paragraphs = re.split(r'\n\s*\n', clean_text, maxsplit=1)
         if len(paragraphs) == 2 and all(p.strip() for p in paragraphs):
             return [("text", p.strip().rstrip("。")) for p in paragraphs]
+    if (group_chat and reply_policy.scene in {"chat", "multiuser", "proactive", "poke"}
+            and not reply_policy.detailed and not reply_policy.tiny and not planned_meme
+            and len(clean_text) <= reply_policy.max_chars
+            and (not decision or (decision.parts and all(p.type == "text" for p in decision.parts)))):
+        sentences = split_two_texts(clean_text, sentence_only=True)
+        if len(sentences) == 2:
+            return [("text", sentence.rstrip("。")) for sentence in sentences]
     if not decision:
         return [("text", clean_text)] if clean_text else []
 
@@ -177,11 +188,13 @@ async def send_response_turn(
     delay_range: tuple[float, float] = (0.7, 2.0),
     allow_addressing: bool = True,
     reply_policy: ReplyPolicy = SHORT_REPLY,
+    group_chat: bool = False,
 ) -> SentTurn:
     """Send complete text in the planned order and record delivered content."""
     from .tools import send_picked_meme
 
-    items = build_turn_items(text=text, decision=decision, planned_meme=planned_meme, reply_policy=reply_policy)
+    items = build_turn_items(text=text, decision=decision, planned_meme=planned_meme,
+                             reply_policy=reply_policy, group_chat=group_chat)
     addressing = decision.addressing if decision and allow_addressing else QQAddressing()
     slots = addressing.mention_slots()
     reserved = frozenset(slots[marker] for kind, value in items if kind == "text"

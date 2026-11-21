@@ -36,7 +36,7 @@ async def deliver_media(bot, *, group_id, user_id, media_type, data, addressing:
     if media_type not in {"image", "voice"}:
         raise ValueError(f"Unsupported media type: {media_type}")
     segment = MessageSegment.image(data) if media_type == "image" else MessageSegment.record(data)
-    message = addressing.prefix() + segment if group_id else Message([segment])
+    message = addressing.prefix(include_reply=media_type != "image") + segment if group_id else Message([segment])
     async def send():
         if group_id:
             return await bot.send_group_msg(group_id=group_id, message=message)

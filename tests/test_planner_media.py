@@ -14,7 +14,7 @@ from src.plugins.llm_chat.qq_addressing import MessageTarget, QQAddressing
 
 
 class PlannerMediaTests(unittest.IsolatedAsyncioTestCase):
-    async def test_media_addressing_reaches_onebot_as_message_segments(self):
+    async def test_group_image_drops_reply_segment_and_keeps_explicit_mention(self):
         from types import SimpleNamespace
         from src.plugins.llm_chat.delivery import deliver_media
 
@@ -25,9 +25,8 @@ class PlannerMediaTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(status, "sent")
         message = bot.send_group_msg.await_args.kwargs["message"]
-        self.assertEqual([segment.type for segment in message], ["reply", "at", "text", "image"])
-        self.assertEqual(message[0].data["id"], "49")
-        self.assertEqual(message[1].data["qq"], "202")
+        self.assertEqual([segment.type for segment in message], ["at", "text", "image"])
+        self.assertEqual(message[0].data["qq"], "202")
 
     async def test_group_addressing_resolves_only_candidates_shown_to_planner(self):
         from src.plugins.llm_chat.proactive import proactive_manager

@@ -107,9 +107,9 @@ class QQAddressing:
         self.reply_to, self.mention = updated.reply_to, updated.mention
         self.additional_mentions, self.audience = updated.additional_mentions, updated.audience
 
-    def prefix(self, *, skip_mentions: frozenset[int] = frozenset()) -> Message:
+    def prefix(self, *, include_reply: bool = True, skip_mentions: frozenset[int] = frozenset()) -> Message:
         message = Message()
-        if self.reply_to is not None:
+        if include_reply and self.reply_to is not None:
             message.append(MessageSegment.reply(self.reply_to))
         for user_id in self.mentions:
             if user_id in skip_mentions:

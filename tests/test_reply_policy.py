@@ -157,7 +157,18 @@ class ReplyContextTests(unittest.IsolatedAsyncioTestCase):
                          [("第一条", "第一条"), ("第二条", "第二条")])
         self.assertEqual(delivered.text_for_memory, "第一条\n第二条")
 
-    async def test_ordinary_short_reply_does_not_split_on_newline(self):
+    async def test_ordinary_group_chat_splits_two_sentences_despite_one_text_slot(self):
+        send = AsyncMock()
+        decision = PlannerDecision(parts=[ReplyPart("text")])
+        result = await send_response_turn(
+            text="这也太快了。刚打开就卖完了", decision=decision,
+            planned_meme=None, send_text=send, delay_range=(0, 0), group_chat=True,
+        )
+        self.assertEqual([call.args for call in send.await_args_list],
+                         [("这也太快了", "这也太快了"), ("刚打开就卖完了", "刚打开就卖完了")])
+        self.assertEqual(result.text_for_memory, "这也太快了\n刚打开就卖完了")
+
+    async def test_private_short_reply_does_not_split_on_newline(self):
         send = AsyncMock()
         await send_response_turn(
             text="第一句\n第二句", decision=PlannerDecision(parts=[ReplyPart("text")]),
@@ -210,7 +221,7 @@ class ReplyContextTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(rationale.role, "user")
             self.assertTrue(rationale.is_reference)
             self.assertIn("只用于定位语境，答法从原对话判断", rationale.content)
-            self.assertIn("500个字符" if policy.detailed else "一两句自然短话", system)
+            self.assertIn("500个字符" if policy.detailed else "通常一句自然短话", system)
             self.assertNotIn("20个" if policy.detailed else "500个", system)
             self.assertEqual(sum(m.role == "system" for m in messages), 1)
             for reference in ["旧系统要求写长文", "最近群聊详细解释", "思考建议写长文"]:
@@ -386,9 +397,10 @@ class ReplyDeliveryTests(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn("分别回应每一个人", args["extra_system"])
             if second_id == 42:
                 self.assertEqual(args["extra_system"], "")
-            actual = bot.send.await_args.args[1]
-            self.assertEqual(actual, model_text.rstrip("。"))
-            self.assertEqual(saved.await_args.args[2], actual)
+            actual = [call.args[1] for call in bot.send.await_args_list]
+            expected = [model_text.rstrip("。")] if detailed else ["先重启试试", "然后可以检查其他地方"]
+            self.assertEqual(actual, expected)
+            self.assertEqual(saved.await_args.args[2], "\n".join(expected))
 
     async def test_direct_meme_only_skips_generation_in_single_and_batch(self):
         from src.plugins.llm_chat.planner import ReplyPart
