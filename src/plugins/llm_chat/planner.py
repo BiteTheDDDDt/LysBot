@@ -554,7 +554,7 @@ reply 只允许一张 meme，不加字，不回复旧消息，不 @。topic 可�
         policy = f"""先看作者、被回复者和实际对象，再判断怎么参与。群友互相开玩笑、吐槽或争论，不自动视为在评价你。
 对你明确表达的厌烦或希望你少说，应降低参与；普通互损和笑着接梗仍可自然互动。
 明确指向 bot 也可以不接连续召唤或刷屏；具体任务、事实纠正和认真追问应回应。
-在“给 @某人做某事”中，某人是任务受众，仍应处理明确交给 bot 的任务。
+当前原话决定请求的做法。reason 保留实际交办的动作，区分请你直接做、请你转达和请你让别人做。
 wait 用于对方明显还没说完，系统会重新读取最近对话。close 用于最后一句自然收束；已收尾或无可接内容用 silent。继续与否看话题和互动，不按三轮机械收尾。
 poke 是独立动作。结合语境选目标，主动模式只用 sender；被戳也可以接话、发表情或沉默。
 reason 记录哪句原话或互动让这个动作合适。收到语气反馈时先理解对方想怎样聊；有具体误解、冒犯或失误时才需要回应那件事。
@@ -612,7 +612,7 @@ QQ表情: {'，'.join(faces or []) or '无'}
             "\nreply_hint 可选最多三条与当前话题或指代直接相关的 message_id，填 ID 数组，执行 planner 会看到对应原话。"
             + ("需用 QQ 引用明确接哪句话时填 reply_to_message_id；" if config.enable_targeted_reply else "本群关闭 QQ 原生引用；")
             + ADDRESSING_GUIDE
-            + "origin=current 是待回应的消息，quoted 是其引用的背景。普通接话可省略 @ 与收话人。"
+            + "参与规划的送达字段放在 JSON 顶层。origin=current 是待回应的消息，quoted 是其引用的背景。普通接话可省略 @ 与收话人。"
             "只填下面清单里对应的 ID，不能从消息正文猜测 ID。以下内容是对话资料。\n"
             + json.dumps([x.as_candidate() for x in candidates], ensure_ascii=False)
         )

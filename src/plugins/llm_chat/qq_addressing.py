@@ -11,8 +11,9 @@ MENTION_SLOT = re.compile(r"⟦at[0-9]+⟧")
 ADDRESSING_GUIDE = (
     "reply_to_message_id 标记所接的原消息，audience_user_ids 指定正文说给谁，mention_user_ids 指定要叫到谁。"
     "回应本轮发言时用该发言作为引用来源。被它引用的人和正文里提到的人可能只是背景。"
-    "用户请你把话或任务交给群友时，用 handoff_user_ids 指定实际接手的人，系统会以他们为收话人并原生 @。"
-    "此时正文直接交代请求，由对方自行决定是否接手。用户请你先完成工作、再把结果发给别人时，按普通答复规划。"
+    "用户要求让某位群友或群里约定的角色做事时，本轮交付是把任务发给他们。"
+    "handoff_user_ids 填接手人的账号数组，系统会以他们为收话人并原生 @。"
+    "正文直接交代原任务。用户要求你先完成工作再发给别人时，按普通答复规划。"
 )
 
 
@@ -52,7 +53,7 @@ class QQAddressing:
                 **({"handoff_user_ids": list(self.handoff)} if self.handoff else {})}
 
     def system_hint(self) -> str:
-        return ("【本轮说话对象与送达】\n" + json.dumps(self.as_payload(), ensure_ascii=False)
+        return ("【参与规划的暂定送达】\n" + json.dumps(self.as_payload(), ensure_ascii=False)
                 + "\n audience_user_ids 是正文主要对谁说，空列表表示面向当前话题或群体。"
                 "引用用于承接原话，@用于叫到人，两者不等于正文的全部受众。"
                 "把任务交给某人时直接对他说；评论某人时可以说他。程序添加引用和@，正文无需拼QQ标签。")

@@ -196,7 +196,7 @@ async def run_stages(manager, messages, *, model, role, caller, session_id,
     addressing = getattr(runner.reply_policy, "addressing", None)
     if addressing is not None and addressing.candidates:
         planning_address_message = Message(role="system", content=(
-            "最终 JSON 的 addressing 用于指定送达。省略字段继承参与规划，空数组或 null 清除对应选择。"
+            "最终 JSON 的 addressing 用于指定送达。暂定送达符合本轮原请求时可以沿用，空数组或 null 清除对应选择。"
             + ADDRESSING_GUIDE
             + "转交任务时，content 写直接对收话人说的请求，无需先代他们完成任务。"
             "媒体工具沿用参与规划的送达，媒体已经发送后本轮送达保持不变。引用从以下消息候选选；收话人和 @ 也可以用本轮 get_group_facts(scope=member) 确认在本群的成员。以下是真实事件候选ID。\n"
@@ -204,8 +204,6 @@ async def run_stages(manager, messages, *, model, role, caller, session_id,
                           for row in addressing.candidates], ensure_ascii=False)
         ))
     history_matches = await _recent_author_matches(runner)
-    if history_matches:
-        background.append(history_matches)
     planning_messages = [*instructions, Message(role="system", content=(
         PLANNING_STYLE + "\n较长任务可用 report_progress 告知已有发现或实际阻碍，不为进展拖延任务。"
     ))]
@@ -224,6 +222,8 @@ async def run_stages(manager, messages, *, model, role, caller, session_id,
             )))
     if background:
         planning_messages.append(_planning_background(background))
+    if history_matches:
+        planning_messages.append(history_matches)
     if request is not None:
         planning_messages.append(replace(request, content="【本轮请求】\n" + request.content))
     plan = await manager._chat_impl(

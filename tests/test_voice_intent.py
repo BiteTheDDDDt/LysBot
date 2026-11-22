@@ -25,7 +25,7 @@ class VoiceIntentTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([part.type for part in decision.parts], ['voice'])
         self.assertIn('用声音演绎当前的梗', prompt)
         self.assertIn('是否明确指向 bot: True', prompt)
-        self.assertIn('某人是任务受众', prompt)
+        self.assertIn('区分请你直接做、请你转达和请你让别人做', prompt)
         self.assertIn(VOICE_INTENT_POLICY, prompt)
         self.assertIn(VOICE_INTENT_POLICY, VOICE_TOOL['function']['description'])
 

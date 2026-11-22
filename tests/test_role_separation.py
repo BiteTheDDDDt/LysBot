@@ -227,11 +227,12 @@ class RoleSeparationTests(unittest.IsolatedAsyncioTestCase):
                 run = current_run.get()
                 self.assertEqual(run.user_question, request.content)
                 self.assertEqual(run.requester_id, 42)
-                background, current = received[-2:]
+                background, recalled, current = received[-3:]
                 self.assertTrue(background.is_reference)
                 history = [json.loads(line) for line in background.content.splitlines()[1:]]
                 self.assertIn({"role": "user", "name": "甲", "sender_id": 42, "content": old_image}, history)
-                self.assertEqual(history[-1]["content"], matches.content)
+                self.assertEqual(recalled, matches)
+                self.assertNotIn(matches.content, background.content)
                 self.assertNotIn(request.content, background.content)
                 self.assertEqual(current.content, "【本轮请求】\n" + request.content)
                 self.assertEqual(current.sender_id, request.sender_id)
