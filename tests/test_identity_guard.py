@@ -224,7 +224,8 @@ class IdentityGuardTests(unittest.IsolatedAsyncioTestCase):
                 await current.start([models.Message("user", "我是问本群那个", sender_id=10101)])
                 self.assertFalse(current.identity_question)
                 self.assertEqual(current.user_question, "我是问本群那个")
-                note = json.loads(current.transcript[-1]["content"].split("\n", 1)[1])[0]
+                self.assertEqual(current.transcript, [])
+                note = json.loads(current.working_context.split("\n", 1)[1])[0]
                 self.assertEqual(note["question"], "本群R姐是谁")
                 self.assertIn("h:0:messages:1", current.evidence)
             finally:
