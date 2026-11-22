@@ -60,6 +60,11 @@ class Message:
             setattr(self, field, unicode_safe(getattr(self, field)))
 
 
+def current_user_message(messages: List[Message]) -> Optional[Message]:
+    return next((m for m in reversed(messages) if m.role == "user"
+                 and not (m.is_reference or m.is_summary or m.is_thinking)), None)
+
+
 class ChatResponse(str):
     def __new__(cls, text: str, reasoning_details: Optional[Any] = None,
                 usage: Optional[Dict[str, int]] = None,

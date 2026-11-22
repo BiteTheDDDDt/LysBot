@@ -4,13 +4,15 @@ The caller supplies the model manager; this module does not construct clients or
 choose providers. All candidate requests still go through manager._chat_impl.
 """
 import asyncio
+import json
+from dataclasses import replace
 from typing import List, Optional
 
 from .config import config
 from .logging_setup import general_logger
 from .response_safety import is_tool_call_text
 from .model_types import (
-    Message, ChatResponse, ModelTurnTimeout, current_session_id,
+    Message, ChatResponse, ModelTurnTimeout, current_session_id, current_user_message,
     _attach_response_context, _add_usage,
 )
 
@@ -107,7 +109,6 @@ async def execute_model_call(
 
 async def _recent_author_matches(runner):
     """Give short group requests a small lookup in the author's own older turns."""
-    import json
     from .memory_index import tokens
     from .tools import _poke_context, execute_tool
     from lysbot.plugins import tool_visible
@@ -138,6 +139,32 @@ async def _recent_author_matches(runner):
     return None
 
 
+def _planning_background(messages):
+    """Encode prior turns as records, without giving them live chat roles."""
+    entries = []
+    images = []
+    for message in messages:
+        entry = {
+            "role": "reference" if message.is_reference or message.is_summary else message.role,
+            "content": message.content,
+        }
+        if message.name:
+            entry["name"] = message.name
+        if message.sender_id is not None:
+            entry["sender_id"] = message.sender_id
+        if message.timestamp:
+            entry["timestamp"] = message.timestamp
+        if message.images:
+            entry["image_indices"] = list(range(len(images) + 1, len(images) + len(message.images) + 1))
+            images.extend(message.images)
+        entries.append(entry)
+    return Message(
+        role="user", is_reference=True, images=images or None,
+        content="【背景资料】按需参考历史对话和检索线索。本轮触发消息单列在后。\n"
+                + "\n".join(json.dumps(entry, ensure_ascii=False) for entry in entries),
+    )
+
+
 async def run_stages(manager, messages, *, model, role, caller, session_id,
                       allow_fallback, required_tool, media_followup):
     from .agent_runner import current_run
@@ -145,9 +172,11 @@ async def run_stages(manager, messages, *, model, role, caller, session_id,
 
     runner = current_run.get()
     runner.revise_output = True
+    request = current_user_message(messages)
+    instructions = [m for m in messages if m.role == "system"]
+    background = [m for m in messages if m is not request and m.role != "system" and not m.is_thinking]
     addressing = getattr(runner.reply_policy, "addressing", None)
     if addressing is not None and addressing.candidates:
-        import json
         planning_address_message = Message(role="system", content=(
             "最终 JSON 可用 addressing 调整说话对象与送达，字段为 audience_user_ids、mention_user_ids 数组和 reply_to_message_id。"
             "省略字段继承参与规划，空数组或 null 清除对应选择。收话人、引用来源、@分别决定。"
@@ -157,8 +186,9 @@ async def run_stages(manager, messages, *, model, role, caller, session_id,
                           for row in addressing.candidates], ensure_ascii=False)
         ))
     history_matches = await _recent_author_matches(runner)
-    planning_context = [*messages[:-1], history_matches, messages[-1]] if history_matches and messages else messages
-    planning_messages = [*planning_context, Message(role="system", content=(
+    if history_matches:
+        background.append(history_matches)
+    planning_messages = [*instructions, Message(role="system", content=(
         PLANNING_STYLE + "\n较长任务可用 report_progress 告知已有发现或实际阻碍，不为进展拖延任务。"
     ))]
     if runner.reply_policy and runner.reply_policy.scene == "fact_check":
@@ -170,6 +200,10 @@ async def run_stages(manager, messages, *, model, role, caller, session_id,
         planning_messages.append(Message(role="system", content=addressing.system_hint()))
         if addressing.candidates:
             planning_messages.append(planning_address_message)
+    if background:
+        planning_messages.append(_planning_background(background))
+    if request is not None:
+        planning_messages.append(replace(request, content="【本轮请求】\n" + request.content))
     plan = await manager._chat_impl(
         planning_messages, model=None, role="planner", caller=caller + ":plan",
         session_id=session_id, allow_fallback=allow_fallback,
@@ -187,7 +221,6 @@ async def run_stages(manager, messages, *, model, role, caller, session_id,
     if runner.reply_policy and runner.reply_policy.scene == "proactive" and not runner.should_reply:
         general_logger.info("[主动发言] 执行规划决定放弃本轮参与，未发送消息")
         return ChatResponse("", usage=getattr(plan, "usage", None))
-    from dataclasses import replace
     # The execution planner has the latest context and can shorten or expand
     # ordinary replies. An earlier participation decision is only provisional.
     policy = runner.reply_policy
@@ -207,7 +240,7 @@ async def run_stages(manager, messages, *, model, role, caller, session_id,
             fallback_attempt=getattr(plan, "fallback_attempt", 0),
             role="chat", caller=caller + ":render_fallback", session_id=session_id,
         )
-    rendering_messages = [m for m in messages if m.role == "system"]
+    rendering_messages = instructions.copy()
     if addressing is not None:
         rendering_messages.append(Message(role="system", content=addressing.rendering_hint(allow_inline=not runner.media_delivered)))
     if runner.reply_policy:
@@ -219,18 +252,21 @@ async def run_stages(manager, messages, *, model, role, caller, session_id,
     if runner.response_mode in {"social", "mixed"}:
         from .image_observations import unsolicited_view
 
-        recent = [m for m in messages if m.role in {"user", "assistant"} and not m.is_summary and not m.is_reference and not m.is_thinking][-6:]
-        rendering_messages.append(Message(role="user", content="最近对话，用于理解指代、语气和梗；事实依据见本轮交接。\n" +
-            "\n".join(f"{m.role}: {unsolicited_view(m.content)[:400]}" for m in recent)))
+        recent = [m for m in background if m.role in {"user", "assistant"} and not m.is_summary and not m.is_reference][-6:]
+        if recent:
+            rendering_messages.append(Message(role="user", is_reference=True,
+                content="最近对话，用于理解指代、语气和梗；事实依据见本轮交接。\n" +
+                        "\n".join(f"{m.role}: {unsolicited_view(m.content)[:400]}" for m in recent)))
     rendering_messages.extend([
         Message(role="system", content=RENDERING_STYLE),
-        Message(role="user", content="用户本轮问题：" + runner.user_question),
         Message(role="system", content=build_rendering_handoff(
             str(plan), response_mode=runner.response_mode,
             requirements=runner.reply_requirements, answer_draft=draft,
             identity=bool(runner.identity_verdict),
         )),
     ])
+    if request is not None:
+        rendering_messages.append(Message(role="user", content="用户本轮问题：" + request.content))
     try:
         result = await manager._chat_impl(
             rendering_messages, model=model, role="chat", caller=caller + ":render",

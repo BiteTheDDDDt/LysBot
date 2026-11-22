@@ -37,7 +37,7 @@ class RoleSeparationTests(unittest.IsolatedAsyncioTestCase):
                             models.Message("assistant", "我？42分，稳得很！"),
                             models.Message("user", "我不信，计算过程给一下"),
                         ], role="chat")
-                    handoff = chat.chat.await_args.args[0][-1].content
+                    handoff = chat.chat.await_args.args[0][-2].content
                     self.assertIn(note, handoff)
                     self.assertIn("content 和 answer_draft 提供回复素材", handoff)
                     self.assertIn("普通玩笑直接接话", handoff)
@@ -57,7 +57,7 @@ class RoleSeparationTests(unittest.IsolatedAsyncioTestCase):
                 run.response_mode = "factual"
                 run.reply_requirements = ["不能把玩笑算式说成真实算法"]
                 return models.ChatResponse("认真追问实际算法，需要澄清前述算式并非程序计算。")
-            handoff = messages[-1].content
+            handoff = messages[-2].content
             self.assertIn("不能把玩笑算式说成真实算法", handoff)
             self.assertIn("认真问答保留必要来源", handoff)
             return models.ChatResponse(answer)
@@ -160,7 +160,9 @@ class RoleSeparationTests(unittest.IsolatedAsyncioTestCase):
                     return models.ChatResponse(draft)
                 with patch.object(manager, "_chat_impl", side_effect=call):
                     result = await manager.run_turn(messages)
-                self.assertEqual(captured["planner"][:-1], messages)
+                self.assertEqual(captured["planner"][0], messages[0])
+                self.assertEqual(captured["planner"][-1].content, "【本轮请求】\n" + question)
+                self.assertIn("群友猜测已经普遍涨价", captured["planner"][-2].content)
                 rendered = captured["chat"]
                 user_inputs = [m.content for m in rendered if m.role == "user"]
                 self.assertEqual(user_inputs[-1], "用户本轮问题：" + question)
@@ -171,10 +173,51 @@ class RoleSeparationTests(unittest.IsolatedAsyncioTestCase):
                 else:
                     self.assertEqual(len(user_inputs), 1)
                 self.assertEqual(rendered[0].content, "保留原人设")
-                payload = json.loads(rendered[-1].content.splitlines()[2])
+                payload = json.loads(rendered[-2].content.splitlines()[2])
                 self.assertEqual(payload["answer_draft"], draft)
-                self.assertNotIn("之前错误断言", rendered[-1].content)
+                self.assertNotIn("之前错误断言", rendered[-2].content)
                 self.assertEqual(str(result), draft)
+
+    async def test_previous_image_and_prefetch_are_background_to_current_request(self):
+        from src.plugins.llm_chat.agent_runner import current_run
+
+        manager = models.ModelManager()
+        old_image = "图片1（自动识别，仅作背景）: 一张道歉声明"
+        request = models.Message("user", "你还记得之前约好由谁来负责吗", name="甲", sender_id=42,
+                                 images=["current-image"])
+        matches = models.Message("user", "之前提到过这项分工", is_reference=True, sender_id=77)
+        messages = [
+            models.Message("assistant", "之前我猜是我"),
+            models.Message("user", old_image, name="甲", sender_id=42),
+            request,
+            models.Message("user", "附带的检索线索", is_reference=True, sender_id=84),
+        ]
+
+        async def call(received, **kwargs):
+            if kwargs["role"] == "planner":
+                run = current_run.get()
+                self.assertEqual(run.user_question, request.content)
+                self.assertEqual(run.requester_id, 42)
+                background, current = received[-2:]
+                self.assertTrue(background.is_reference)
+                history = [json.loads(line) for line in background.content.splitlines()[1:]]
+                self.assertIn({"role": "user", "name": "甲", "sender_id": 42, "content": old_image}, history)
+                self.assertEqual(history[-1]["content"], matches.content)
+                self.assertNotIn(request.content, background.content)
+                self.assertEqual(current.content, "【本轮请求】\n" + request.content)
+                self.assertEqual(current.sender_id, request.sender_id)
+                self.assertEqual(current.images, request.images)
+                run.response_mode = "mixed"
+                return models.ChatResponse("按约定由乙负责")
+            self.assertEqual(received[-1].content, "用户本轮问题：" + request.content)
+            self.assertTrue(received[-2].content.startswith("【本轮内容交接】"))
+            return models.ChatResponse("是乙")
+
+        with (
+            patch("src.plugins.llm_chat.model_turn._recent_author_matches", AsyncMock(return_value=matches)),
+            patch.object(manager, "_chat_impl", side_effect=call),
+        ):
+            self.assertEqual(await manager.run_turn(messages), "是乙")
 
     async def test_execution_plan_can_shorten_selected_detail_with_one_hint(self):
         from src.plugins.llm_chat.agent_runner import current_run
@@ -288,7 +331,7 @@ class RoleSeparationTests(unittest.IsolatedAsyncioTestCase):
                     handoffs = []
                     for adapter in (chat_one, chat_two):
                         messages = adapter.chat.await_args.args[0]
-                        handoff = messages[-1]
+                        handoff = messages[-2]
                         self.assertEqual(handoff.role, "system")
                         data = json.loads(handoff.content.splitlines()[2])
                         self.assertEqual(data["response_mode"], mode)

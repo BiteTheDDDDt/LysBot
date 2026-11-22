@@ -120,15 +120,15 @@ class AgentRunner:
         self.progress_messages = []
 
     async def start(self, messages):
+        from .model_types import current_user_message
         from .tools import _poke_context
 
         context = _poke_context.get() or {}
+        request = current_user_message(messages)
         self.injected_memories = [ref for m in messages for ref in (getattr(m, "memory_refs", None) or [])
                                   if ref.get("id", "") in m.content]
         self.request_source_ids = []
-        self.requester_id = context.get("user_id") or next(
-            (m.sender_id for m in reversed(messages) if m.role == "user" and m.sender_id), None
-        )
+        self.requester_id = context.get("user_id") or (request.sender_id if request else None)
         if self.memory_path and self.session_id != "_unknown_":
             from .memory_index import connect, generation
 
@@ -150,8 +150,7 @@ class AgentRunner:
             except Exception as error:  # noqa: BLE001 -- persistence failure must not lose the current user turn.
                 general_logger.warning(f"[agent_start] memory unavailable: {type(error).__name__}")
         active_runs[self.session_id] = self
-        latest = messages[-1].content if messages else ""
-        self.user_question = latest or ""
+        self.user_question = request.content if request else ""
         from .working_context import restore_context
         from sqlite3 import Error as SQLiteError
 
@@ -377,7 +376,9 @@ class AgentRunner:
         if self.remaining() < 15 or self.tool_calls >= config.agent_max_tool_calls:
             kwargs.pop("tools", None)
             kwargs.pop("tool_choice", None)
-        search_active = any(m.get("role") == "tool" and m.get("name") in READ_TOOLS for m in self.transcript)
+        search_active = (self.planning_active or not self.revise_output) and any(
+            m.get("role") == "tool" and m.get("name") in READ_TOOLS for m in self.transcript
+        )
         model_remaining = self.planning_remaining() if self.planning_active else self.remaining()
         if model_remaining <= 0:
             raise asyncio.TimeoutError("planner budget exhausted; reserved time belongs to the final reply")
@@ -401,7 +402,7 @@ class AgentRunner:
                 "content": "检索进度："
                 f"本轮已执行 {self.tool_calls} 次工具，剩余约 {int(self.remaining())} 秒；下一跳应解决明确缺口，可批量查独立候选。",
             })
-        if self.no_new_evidence_calls >= 3:
+        if search_active and self.no_new_evidence_calls >= 3:
             messages.append(
                 {
                     "role": "user",
@@ -661,8 +662,12 @@ class AgentRunner:
             messages, extra_body, tools_enabled, required_tool,
             None if self.revise_output and required_tool else media_followup,
         )
-        # Retain completed tool observations when ModelManager changes provider.
-        formatted.extend(self.transcript)
+        # Provider fallback within planning still needs the paired tool calls.
+        # The separate chat stage receives their outcome in the handoff.
+        if tools_enabled or not self.revise_output:
+            formatted.extend(self.transcript)
+        else:
+            formatted.extend(m for m in self.transcript if m.get("role") == "user")
         kwargs["messages"] = formatted
         log = general_logger.bind(category="llm")
         accumulated_usage: dict[str, int] = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
