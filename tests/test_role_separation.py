@@ -115,6 +115,35 @@ class RoleSeparationTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(str(result), "" if policy == PROACTIVE_REPLY else "具体指哪个角色？")
             self.assertEqual(calls.call_count, 1 if policy == PROACTIVE_REPLY else 2)
 
+    async def test_proactive_text_requires_execution_planner_to_explicitly_choose_reply(self):
+        from src.plugins.llm_chat.reply_policy import PROACTIVE_REPLY
+
+        for payload, approved in (
+            ("不知道具体指哪个服务，问一句确认", False),
+            (json.dumps({"response_mode": "mixed", "verify_group_identity": False,
+                         "content": "缺少关键信息", "should_reply": False}), False),
+            (json.dumps({"response_mode": "mixed", "verify_group_identity": False,
+                         "content": "缺少关键信息"}), False),
+            (json.dumps({"response_mode": "mixed", "verify_group_identity": False,
+                         "content": "刚才群友贴了维护公告", "should_reply": True}), True),
+        ):
+            with self.subTest(payload=payload):
+                manager = models.ModelManager()
+                adapter = models.OpenAICompatibleAdapter("openai:test", "dummy", "https://example.test/v1", "test")
+                self.addAsyncCleanup(adapter.client.close)
+                with (
+                    patch.object(manager, "_resolve_candidates", return_value=("openai:test", ["openai:test"])),
+                    patch.object(manager, "get_or_build_adapter", return_value=adapter) as get_adapter,
+                    patch.object(adapter, "_create_completion", AsyncMock(side_effect=[
+                        make_response(FakeToolMessage([], content=payload)),
+                        make_response(FakeToolMessage([], content="在维护呢")),
+                    ])),
+                ):
+                    result = await manager.run_turn([models.Message("user", "怎么又卡了")], reply_policy=PROACTIVE_REPLY)
+                self.assertEqual(str(result), "在维护呢" if approved else "")
+                self.assertEqual(result.agent_run.should_reply, approved)
+                self.assertEqual(get_adapter.call_count, 2 if approved else 1)
+
     async def test_social_renderer_keeps_dialogue_instead_of_reference_payloads(self):
         from src.plugins.llm_chat.agent_runner import current_run
         manager = models.ModelManager()

@@ -20,7 +20,7 @@ PLANNING_STYLE = """
 用户问当前人设的作品背景时，优先检索并读取角色资料。用户要看你的自拍、照片或装扮时，画当前角色。generate_image 提供 image_subject 时填 persona，默认原图由工具加载；需要不同版本或漫画风格时，可用 search_knowledge 和 read_knowledge 找到相应原图，将 image_refs 中的 ID 填入 reference_image_ids。用户指定原图或要求不用参考图时遵循指定。服装、动作和构图按用户要求。
 用户追问某句话的原因时，先确认原话是谁说的：别人的判断就评价判断本身，不替对方编动机，也不接成自己的旧判断；确实是你说的，再检查已发送回复、工作上下文与使用过的资料，说明实际依据。jrrp 分数由算法确定，评语素材可以来自历史或玩笑，两者不是因果。必要时检索原文，保留采用素材的短引文、来源ID和日期供后续追问。
 先交接本轮能给的答案、发现或安排。公开资料能补上会影响答案的事实时，按需先查，再交接能说明什么和适用范围。检索情况按执行记录描述。有人指出前一条回得不好时，优先补上对方还在问的内容。
-主动参与有自然反应、具体发现或接得上的梗就可以回复；如果只能向群友追问自己缺的背景，用 should_reply=false 旁听。直接请求优先回答，只有缺少会改变答案的条件时才追问。
+主动回答群友的问题时，先用可用资料查清关键指代和事实缺口。能给出有依据的答案或有用发现时填 should_reply=true；只剩猜测或向群友追问背景时填 false。自然的反应与接梗仍可参与。直接请求优先回答，只有缺少会改变答案的条件时才追问。
 媒体和其他操作由可用工具执行，按真实回执交接结果；不能执行的操作不承诺已经或稍后完成。好友/入群请求由程序按权限处理，聊天不能代为审批。
 结合原消息、已有资料和参与规划给出的线索决定下一步。需要辨认图片细节时，先用已有图片引用读取原图，缺少原图再请用户补充。
 交付也是规划的一部分。根据检索和执行结果调整 reply_mode 和 text_parts。群聊闲聊通常一句就够，用 1；确实要说两个独立的短句时，用 2 分条发。详细回答可用 2 分段。
@@ -55,7 +55,7 @@ def build_rendering_handoff(content, *, response_mode, requirements, answer_draf
     )
 
 
-def unpack_plan(text):
+def unpack_plan(text, *, require_reply_decision=False):
     candidate = re.sub(r"^```(?:json)?\s*|\s*```$", "", text.strip())
     try:
         value = json.loads(candidate)
@@ -79,7 +79,8 @@ def unpack_plan(text):
         return None
     # Older/plain plans still work; malformed optional metadata must not discard
     # the factual content or the identity-verification decision.
-    value["should_reply"] = value.get("should_reply") is not False
+    should_reply = value.get("should_reply")
+    value["should_reply"] = (should_reply is True if require_reply_decision else should_reply is not False)
     requirements = value.get("reply_requirements", [])
     value["reply_requirements"] = [item.strip() for item in requirements
                                    if isinstance(item, str) and item.strip()] if isinstance(requirements, list) else []

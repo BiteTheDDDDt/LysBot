@@ -953,7 +953,9 @@ async def _enrich_group_record(bot, event, resolved, stored_message, sender_name
     if not (directed_at_other or image_urls or faces) and repeat_manager.is_candidate(group_id, plain_message):
         repeat_candidate = plain_message
     kwargs = {"repeat_candidate": repeat_candidate} if repeat_candidate else {}
-    await proactive_manager.try_proactive(bot, group_id, proactive_content, user_id, _recorded=True, **kwargs)
+    await proactive_manager.try_proactive(
+        bot, group_id, proactive_content, user_id, request_text=plain_message, _recorded=True, **kwargs,
+    )
 
 
 async def should_respond(event: MessageEvent) -> bool:

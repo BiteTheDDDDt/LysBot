@@ -962,7 +962,8 @@ class AgentRunner:
 
         if tools_enabled:
             from .conversation_style import unpack_plan, looks_like_plan
-            plan = unpack_plan(content)
+            proactive = getattr(self.reply_policy, "scene", None) == "proactive"
+            plan = unpack_plan(content, require_reply_decision=proactive)
             if plan is None and looks_like_plan(content):
                 from .memory_index import digest
                 log.warning(f"[planner_format] run={self.id} model={backend.model_name} "
@@ -970,6 +971,8 @@ class AgentRunner:
                 error = ValueError("planner 返回了无效的规划格式")
                 error.usage = accumulated_usage
                 raise error
+            if proactive and plan is None:
+                self.should_reply = False
             if plan:
                 addressing = getattr(self.reply_policy, "addressing", None)
                 if addressing is not None and not self.media_delivered:

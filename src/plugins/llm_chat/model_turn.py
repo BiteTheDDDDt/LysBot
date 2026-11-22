@@ -108,23 +108,26 @@ async def execute_model_call(
 
 
 async def _recent_author_matches(runner):
-    """Give short group requests a small lookup in the author's own older turns."""
+    """Prefetch short group turns within the relevant speaker or group scope."""
     from .memory_index import tokens
     from .tools import _poke_context, execute_tool
     from lysbot.plugins import tool_visible
 
     context = _poke_context.get() or {}
+    proactive = getattr(runner.reply_policy, "scene", None) == "proactive"
     text = context.get("current_user_text", "").strip()
     if (not runner.memory_path or not runner.session_id.startswith("group_")
-            or not runner.requester_id or not 0 < len(text) <= 120
+            or (not proactive and not runner.requester_id) or not 0 < len(text) <= 120
             or not tool_visible("recall_history")):
         return None
     term = max((term for term in tokens(text) if len(term) >= 2 and not term.isdigit()),
-               key=len, default="")
+               key=lambda word: (word.isascii() and any(c.isdigit() for c in word), len(word)),
+               default="")
     if not term:
         return None
-    filters = {"exact_phrase": term, "mode": "keyword", "sources": ["messages"],
-               "author_ids": [runner.requester_id], "roles": ["user"]}
+    filters = {"exact_phrase": term, "mode": "keyword", "sources": ["messages"], "roles": ["user"]}
+    if not proactive:
+        filters["author_ids"] = [runner.requester_id]
     recent, earlier = [], []
     try:
         async with asyncio.timeout(2.0):
@@ -148,7 +151,7 @@ async def _recent_author_matches(runner):
     ]
     if records:
         return Message(role="user", is_reference=True, content=(
-            "【本群同一发言者此前提到的相关原话，仅作指代线索】\n" + json.dumps(records, ensure_ascii=False)
+            "【本群相关历史原话，仅作指代线索】\n" + json.dumps(records, ensure_ascii=False)
         ))
     return None
 

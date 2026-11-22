@@ -130,6 +130,38 @@ class SearchStorageTests(unittest.IsolatedAsyncioTestCase):
             current_session_id.reset(session_token)
             current_run.reset(run_token)
 
+    async def test_proactive_prefetch_resolves_short_name_from_another_group_member(self):
+        from src.plugins.llm_chat.model_turn import _recent_author_matches
+        from src.plugins.llm_chat.model_types import current_session_id
+        from src.plugins.llm_chat.reply_policy import PROACTIVE_REPLY
+
+        question = "为什么Q7周末还是这么卡"
+        reference = "Q7 是论坛的简称"
+        with connect(self.manager._db_path) as db:
+            db.executemany(
+                "INSERT INTO messages_detail(session_id,role,name,sender_id,content,timestamp) VALUES(?,?,?,?,?,?)",
+                [("group_7", "user", "乙", 202, reference, "2026-09-20T10:00:00"),
+                 ("group_7", "user", "甲", 101, question, "2026-09-20T10:01:00"),
+                 ("group_8", "user", "乙", 202, "Q7 外群内容", "2026-09-20T10:02:00")],
+            )
+        runner = AgentRunner("group_7")
+        runner.memory_path = self.manager._db_path
+        runner.reply_policy = PROACTIVE_REPLY
+        run_token = current_run.set(runner)
+        session_token = current_session_id.set("group_7")
+        tools.set_poke_context(7, 101, current_user_text=question, history_request_texts=[question])
+        try:
+            await runner.start([models.Message("user", question)])
+            with patch.object(memory_module, "memory_manager", self.manager):
+                background = await _recent_author_matches(runner)
+            records = json.loads(background.content.splitlines()[1])
+            self.assertEqual([item["text"] for item in records], [reference])
+        finally:
+            await runner.finish("complete")
+            tools.clear_poke_context()
+            current_session_id.reset(session_token)
+            current_run.reset(run_token)
+
     async def test_author_filter_never_returns_other_speakers_text(self):
         found = await self.search.search("group_7", query="RTX", mode="keyword", author_ids=["101"])
         self.assertTrue(found["items"])
