@@ -186,6 +186,7 @@ async def run_stages(manager, messages, *, model, role, caller, session_id,
                       allow_fallback, required_tool, media_followup):
     from .agent_runner import current_run
     from .conversation_style import PLANNING_STYLE, RENDERING_STYLE, build_rendering_handoff
+    from .qq_addressing import ADDRESSING_GUIDE
 
     runner = current_run.get()
     runner.revise_output = True
@@ -195,11 +196,11 @@ async def run_stages(manager, messages, *, model, role, caller, session_id,
     addressing = getattr(runner.reply_policy, "addressing", None)
     if addressing is not None and addressing.candidates:
         planning_address_message = Message(role="system", content=(
-            "最终 JSON 可用 addressing 调整说话对象与送达，字段为 audience_user_ids、mention_user_ids 数组和 reply_to_message_id。"
-            "省略字段继承参与规划，空数组或 null 清除对应选择。收话人、引用来源、@分别决定。"
+            "最终 JSON 的 addressing 用于指定送达。省略字段继承参与规划，空数组或 null 清除对应选择。"
+            + ADDRESSING_GUIDE
+            + "转交任务时，content 写直接对收话人说的请求，无需先代他们完成任务。"
             "媒体工具沿用参与规划的送达，媒体已经发送后本轮送达保持不变。引用从以下消息候选选；收话人和 @ 也可以用本轮 get_group_facts(scope=member) 确认在本群的成员。以下是真实事件候选ID。\n"
-            + json.dumps([{"message_id": row.message_id if addressing.allow_reply else None,
-                           "user_id": row.user_id, "text": row.text[:180]}
+            + json.dumps([row.as_candidate(allow_reply=addressing.allow_reply)
                           for row in addressing.candidates], ensure_ascii=False)
         ))
     history_matches = await _recent_author_matches(runner)
@@ -217,6 +218,10 @@ async def run_stages(manager, messages, *, model, role, caller, session_id,
         planning_messages.append(Message(role="system", content=addressing.system_hint()))
         if addressing.candidates:
             planning_messages.append(planning_address_message)
+        if addressing.handoff:
+            planning_messages.append(Message(role="system", content=(
+                "本轮送达已选择转交任务。用一句话直接交代原请求，按需确认收话人和任务内容。"
+            )))
     if background:
         planning_messages.append(_planning_background(background))
     if request is not None:

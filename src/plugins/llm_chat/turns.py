@@ -134,6 +134,8 @@ def build_turn_items(
     text = enforce_reply_budget(text, reply_policy)
     decision = constrain_plan(decision, reply_policy)
     clean_text = text.strip()
+    if decision and decision.addressing.handoff:
+        return [("text", clean_text)] if clean_text else []
     # The content planner can expand a one-text participation plan. Natural
     # paragraph breaks then suffice; no additional output schema is needed.
     if (reply_policy.text_parts is None and reply_policy.detailed and clean_text and not planned_meme

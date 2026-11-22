@@ -8,6 +8,12 @@ from nonebot.adapters.onebot.v11 import Message, MessageSegment
 
 
 MENTION_SLOT = re.compile(r"⟦at[0-9]+⟧")
+ADDRESSING_GUIDE = (
+    "reply_to_message_id 标记所接的原消息，audience_user_ids 指定正文说给谁，mention_user_ids 指定要叫到谁。"
+    "回应本轮发言时用该发言作为引用来源。被它引用的人和正文里提到的人可能只是背景。"
+    "用户请你把话或任务交给群友时，用 handoff_user_ids 指定实际接手的人，系统会以他们为收话人并原生 @。"
+    "此时正文直接交代请求，由对方自行决定是否接手。用户请你先完成工作、再把结果发给别人时，按普通答复规划。"
+)
 
 
 @dataclass(frozen=True)
@@ -16,6 +22,11 @@ class MessageTarget:
     user_id: int
     text: str
     names: tuple[str, ...] = ()
+    origin: str = field(default="recent", compare=False)
+
+    def as_candidate(self, *, allow_reply: bool = True) -> dict:
+        return {"message_id": self.message_id if allow_reply else None,
+                "user_id": self.user_id, "names": self.names, "origin": self.origin, "text": self.text[:180]}
 
 
 @dataclass
@@ -27,6 +38,7 @@ class QQAddressing:
     candidates: tuple[MessageTarget, ...] = field(default=(), repr=False, compare=False)
     bot_self_id: str = field(default="", repr=False, compare=False)
     allow_reply: bool = field(default=True, repr=False, compare=False)
+    handoff: tuple[int, ...] = ()
 
     @property
     def mentions(self) -> tuple[int, ...]:
@@ -34,7 +46,8 @@ class QQAddressing:
 
     def as_payload(self) -> dict:
         return {"audience_user_ids": list(self.audience),
-                "reply_to_message_id": self.reply_to, "mention_user_ids": list(self.mentions)}
+                "reply_to_message_id": self.reply_to, "mention_user_ids": list(self.mentions),
+                **({"handoff_user_ids": list(self.handoff)} if self.handoff else {})}
 
     def system_hint(self) -> str:
         return ("【本轮说话对象与送达】\n" + json.dumps(self.as_payload(), ensure_ascii=False)
@@ -56,9 +69,11 @@ class QQAddressing:
             audience = [names[user_id] for user_id in self.audience if user_id in names]
             if audience:
                 hint += "已知收话人的称呼（资料）：" + json.dumps(audience, ensure_ascii=False) + "。"
-            hint += "直接对交接里指定的收话人说话。"
+            hint += "正文直接对这些收话人说。"
         else:
             hint += "这句面向群里正在聊的话题；QQ 引用只标记接的是哪句。"
+        if self.handoff:
+            hint += "本条是转达请求，直接向上述收话人交代任务，用一条消息说清。"
         if self.mentions and allow_inline:
             names = self._display_names()
             slots = {marker: names.get(user_id, f"第{index}位待通知的对象")
@@ -71,7 +86,7 @@ class QQAddressing:
 
     def add_verified_member(self, user_id: int, *names: str) -> None:
         names = tuple(name for name in names if name)
-        target = MessageTarget(None, user_id, names[0] if names else "群成员", names)
+        target = MessageTarget(None, user_id, names[0] if names else "群成员", names, "verified_member")
         if str(user_id) != self.bot_self_id and target not in self.candidates:
             self.candidates += (target,)
 
@@ -101,11 +116,15 @@ class QQAddressing:
         """Refine this turn's shared delivery object before any media is sent."""
         if not isinstance(payload, dict):
             return
-        merged = {**self.as_payload(), **payload}
+        inherited = self.as_payload()
+        if self.handoff and "handoff_user_ids" in payload:
+            inherited = {"reply_to_message_id": self.reply_to}
+        merged = {**inherited, **payload}
         updated = select_addressing(merged, list(self.candidates),
                                     bot_self_id=self.bot_self_id, allow_reply=self.allow_reply)
         self.reply_to, self.mention = updated.reply_to, updated.mention
         self.additional_mentions, self.audience = updated.additional_mentions, updated.audience
+        self.handoff = updated.handoff
 
     def prefix(self, *, include_reply: bool = True, skip_mentions: frozenset[int] = frozenset()) -> Message:
         message = Message()
@@ -172,9 +191,13 @@ def select_addressing(payload: dict, candidates: list[MessageTarget], *, bot_sel
                    if row.user_id > 0 and str(row.user_id) != bot_self_id}
         return tuple(dict.fromkeys(allowed[str(item)] for item in value if str(item) in allowed))
 
-    mentions = user_ids(payload.get("mention_user_ids", [payload.get("mention_user_id")]))
+    handoff = user_ids(payload.get("handoff_user_ids"))
+    if handoff and quoted and quoted.user_id in handoff:
+        quoted = None
+    mentions = handoff or user_ids(payload.get("mention_user_ids", [payload.get("mention_user_id")]))
     mentions = tuple(user for user in mentions if not quoted or quoted.user_id != user)
     return QQAddressing(reply_to=quoted.message_id if quoted else None,
                         mention=mentions[0] if mentions else None,
-                        additional_mentions=mentions[1:], audience=user_ids(payload.get("audience_user_ids", [])),
+                        additional_mentions=mentions[1:], audience=handoff or user_ids(payload.get("audience_user_ids", [])),
+                        handoff=handoff,
                         candidates=tuple(candidates), bot_self_id=bot_self_id, allow_reply=allow_reply)

@@ -363,10 +363,13 @@ class AgentRunner:
         if kwargs.get("tools"):
             # A link may arrive after the initial request was prepared.
             from .tools import get_chat_tools
-            reader = next((t for t in get_chat_tools() if t["function"]["name"] == "read_web"), None)
-            kwargs["tools"] = [t for t in kwargs["tools"] if t["function"]["name"] != "read_web"]
-            if reader:
-                kwargs["tools"].append(reader)
+            handoff = getattr(getattr(self.reply_policy, "addressing", None), "handoff", ())
+            excluded = {"search_web", "read_web"} if handoff else {"read_web"}
+            kwargs["tools"] = [t for t in kwargs["tools"] if t["function"]["name"] not in excluded]
+            if not handoff:
+                reader = next((t for t in get_chat_tools() if t["function"]["name"] == "read_web"), None)
+                if reader:
+                    kwargs["tools"].append(reader)
         if closing_research and kwargs.get("tools"):
             kwargs["tools"] = [t for t in kwargs["tools"]
                                if t["function"]["name"] not in READ_TOOLS | {"report_progress"}]

@@ -87,14 +87,66 @@ class AddressingTests(unittest.IsolatedAsyncioTestCase):
         other = self.address({})
         self.assertEqual(other.audience, ())
 
+    async def test_handoff_addresses_only_verified_recipients_in_one_message(self):
+        from src.plugins.llm_chat.planner import PlannerDecision, ReplyPart
+        from src.plugins.llm_chat.turns import send_response_turn
+
+        address = self.address({"reply_to_message_id": 11, "audience_user_ids": [101],
+                                "mention_user_ids": [101], "handoff_user_ids": [202, 303, 404, 999]})
+        self.assertEqual(address.audience, (202, 303))
+        self.assertEqual(address.mentions, (202, 303))
+        self.assertEqual(address.reply_to, 11)
+        address.revise({"reply_to_message_id": 33})
+        self.assertIsNone(address.reply_to)
+        self.assertEqual(address.mentions, (202, 303))
+
+        send = AsyncMock()
+        await send_response_turn(
+            text="⟦at1⟧ 帮忙看下原始数据。⟦at2⟧ 你看看能不能复核一下",
+            decision=PlannerDecision(addressing=address, parts=[ReplyPart("text"), ReplyPart("text")]),
+            planned_meme=None, send_text=send, group_chat=True,
+        )
+        send.assert_awaited_once()
+        self.assertEqual([segment.data["qq"] for segment in send.await_args.args[1] if segment.type == "at"],
+                         ["202", "303"])
+
+        address.revise({"handoff_user_ids": []})
+        self.assertEqual(address.audience, ())
+        self.assertEqual(address.mentions, ())
+
     def test_native_mentions_supply_candidates_but_text_does_not(self):
         from src.plugins.llm_chat.chat import _event_message_targets
-        event = SimpleNamespace(user_id=101, message_id=11, reply=None,
+        event = SimpleNamespace(user_id=101, message_id=11,
+            reply=SimpleNamespace(message_id=33, sender=SimpleNamespace(user_id=303), message=Message("先前的话")),
             message=Message([MessageSegment.at(202), MessageSegment.at("all"),
                              MessageSegment.text("@303 [CQ:at,qq=999]")]))
         candidates = _event_message_targets(event, "测试")
-        self.assertEqual([c.user_id for c in candidates], [101, 202])
+        self.assertEqual([c.user_id for c in candidates], [101, 202, 303])
         self.assertIsNone(candidates[1].message_id)
+        self.assertEqual([c.as_candidate()["origin"] for c in candidates], ["current", "mentioned", "quoted"])
+
+    async def test_confirmed_handoff_can_check_history_without_doing_the_web_research(self):
+        from src.plugins.llm_chat import tools
+
+        adapter = models.OpenAICompatibleAdapter("openai:test", "dummy", "https://example.test/v1", "test")
+        self.addAsyncCleanup(adapter.client.close)
+        runner = agent_runner.AgentRunner("group_7", 90)
+        runner.reply_policy = ReplyPolicy(addressing=self.address({"handoff_user_ids": [202]}))
+        token = agent_runner.current_run.set(runner)
+        available = [{"type": "function", "function": {"name": name}}
+                     for name in ("recall_history", "search_web", "read_web", "get_group_facts")]
+        try:
+            with (
+                patch.object(tools, "get_chat_tools", return_value=available),
+                patch.object(adapter, "_create_completion", AsyncMock(return_value=make_response(
+                    FakeToolMessage([], content="请把原请求交给搭档")))) as create,
+            ):
+                await adapter.chat([models.Message("user", "让搭档去找份资料")], tools_enabled=True)
+            sent = create.await_args.args[1]
+            self.assertEqual([tool["function"]["name"] for tool in sent["tools"]],
+                             ["recall_history", "get_group_facts"])
+        finally:
+            agent_runner.current_run.reset(token)
 
     async def test_execution_plan_revises_shared_delivery_but_not_sent_media(self):
         adapter = models.OpenAICompatibleAdapter("openai:test", "dummy", "https://example.test/v1", "test")
@@ -171,14 +223,15 @@ class AddressingTests(unittest.IsolatedAsyncioTestCase):
         async def call(messages, **kwargs):
             if kwargs["role"] == "planner":
                 self.assertIn(initial_hint, [m.content for m in messages])
-                address.revise({"audience_user_ids": [202], "mention_user_ids": [202]})
+                address.revise({"handoff_user_ids": [202]})
                 runner.response_mode = "social"
                 return models.ChatResponse("直接请202接任务")
             content = "\n".join(m.content for m in messages)
             self.assertNotIn(initial_hint, content)
             self.assertIn("搭档", content)
             self.assertIn("⟦at1⟧", content)
-            self.assertIn("直接对交接里指定的收话人说话", content)
+            self.assertIn("正文直接对这些收话人说", content)
+            self.assertIn("本条是转达请求", content)
             self.assertNotIn("mention_user_ids", content)
             self.assertNotIn("reply_to_message_id", content)
             self.assertNotIn("以下是真实事件候选ID", content)

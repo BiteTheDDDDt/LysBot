@@ -8,7 +8,7 @@ from typing import Optional
 from nonebot import logger
 
 from .config import config
-from .qq_addressing import MessageTarget, QQAddressing, select_addressing
+from .qq_addressing import ADDRESSING_GUIDE, MessageTarget, QQAddressing, select_addressing
 from .memory import memory_manager
 from .memes import ALLOWED_TOPICS
 from .models import Message as LLMMessage, model_manager
@@ -611,12 +611,10 @@ QQ表情: {'，'.join(faces or []) or '无'}
         prompt += (
             "\nreply_hint 可选最多三条与当前话题或指代直接相关的 message_id，填 ID 数组，执行 planner 会看到对应原话。"
             + ("需用 QQ 引用明确接哪句话时填 reply_to_message_id；" if config.enable_targeted_reply else "本群关闭 QQ 原生引用；")
-            + "确实要叫到某位群友（例如把问题交给他）时，填 mention_user_ids 数组，可选多位。"
-            "audience_user_ids 数组独立表示正文说给谁听，可为一人、多人或空列表（面向话题/群体）。"
-            "讨论谁不等于对谁说；任务转交要把接任务的人列为收话人。普通接话无需 @。引用已能明确对象时，不重复 @ 同一个人。"
+            + ADDRESSING_GUIDE
+            + "origin=current 是待回应的消息，quoted 是其引用的背景。普通接话可省略 @ 与收话人。"
             "只填下面清单里对应的 ID，不能从消息正文猜测 ID。以下内容是对话资料。\n"
-            + json.dumps([{"message_id": x.message_id,
-                           "user_id": x.user_id, "text": x.text[:180]} for x in candidates], ensure_ascii=False)
+            + json.dumps([x.as_candidate() for x in candidates], ensure_ascii=False)
         )
     if trigger_kind == "poke":
         prompt += (
@@ -662,6 +660,9 @@ QQ表情: {'，'.join(faces or []) or '无'}
             decision.addressing = select_addressing(
                 payload, candidates, bot_self_id=bot_self_id, allow_reply=config.enable_targeted_reply,
             )
+            if decision.addressing.handoff:
+                decision.action = "reply"
+                decision.parts = [ReplyPart("text")]
         logger.info(
             f"[planner] mode={mode} group={group_id} action={decision.action} "
             f"topic={decision.topic_state} parts={decision.parts_label} "
