@@ -23,10 +23,12 @@ class MessageTarget:
     text: str
     names: tuple[str, ...] = ()
     origin: str = field(default="recent", compare=False)
+    quoted_message_id: int | None = field(default=None, compare=False)
 
     def as_candidate(self, *, allow_reply: bool = True) -> dict:
         return {"message_id": self.message_id if allow_reply else None,
-                "user_id": self.user_id, "names": self.names, "origin": self.origin, "text": self.text[:180]}
+                "user_id": self.user_id, "names": self.names, "origin": self.origin,
+                "quoted_message_id": self.quoted_message_id if allow_reply else None, "text": self.text[:180]}
 
 
 @dataclass
@@ -191,13 +193,23 @@ def select_addressing(payload: dict, candidates: list[MessageTarget], *, bot_sel
                    if row.user_id > 0 and str(row.user_id) != bot_self_id}
         return tuple(dict.fromkeys(allowed[str(item)] for item in value if str(item) in allowed))
 
+    audience = user_ids(payload.get("audience_user_ids", []))
     handoff = user_ids(payload.get("handoff_user_ids"))
+    if quoted and str(quoted.user_id) == bot_self_id:
+        replies = [row for row in candidates if row.origin == "current" and row.message_id is not None
+                   and row.quoted_message_id == quoted.message_id]
+        if replies:
+            # A reply to our prior message supplies that message as background.
+            # Anchor the new reply to the participant's actual message instead.
+            matching = [row for row in replies if row.user_id in audience]
+            choices = matching or replies
+            quoted = choices[0] if len(choices) == 1 else None
     if handoff and quoted and quoted.user_id in handoff:
         quoted = None
     mentions = handoff or user_ids(payload.get("mention_user_ids", [payload.get("mention_user_id")]))
     mentions = tuple(user for user in mentions if not quoted or quoted.user_id != user)
     return QQAddressing(reply_to=quoted.message_id if quoted else None,
                         mention=mentions[0] if mentions else None,
-                        additional_mentions=mentions[1:], audience=handoff or user_ids(payload.get("audience_user_ids", [])),
+                        additional_mentions=mentions[1:], audience=handoff or audience,
                         handoff=handoff,
                         candidates=tuple(candidates), bot_self_id=bot_self_id, allow_reply=allow_reply)

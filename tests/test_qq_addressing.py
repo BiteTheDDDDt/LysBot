@@ -124,6 +124,22 @@ class AddressingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([c.user_id for c in candidates], [101, 202, 303])
         self.assertIsNone(candidates[1].message_id)
         self.assertEqual([c.as_candidate()["origin"] for c in candidates], ["current", "mentioned", "quoted"])
+        self.assertEqual(candidates[0].as_candidate()["quoted_message_id"], 33)
+
+    def test_execution_retarget_to_bot_parent_quotes_the_current_reply_instead(self):
+        prior = MessageTarget(44, 404, "请查完发结果", origin="quoted")
+        first = MessageTarget(11, 101, "收到，刚才查询超时了", origin="current", quoted_message_id=44)
+        second = MessageTarget(22, 202, "我也在查", origin="current", quoted_message_id=44)
+        address = select_addressing({"audience_user_ids": [101]}, [prior, first],
+                                    bot_self_id="404", allow_reply=True)
+        address.revise({"reply_to_message_id": 44})
+        self.assertEqual(address.text("靠谱 辛苦啦")[0].data["id"], "11")
+
+        address = select_addressing({"reply_to_message_id": 44}, [prior, first, second],
+                                    bot_self_id="404", allow_reply=True)
+        self.assertIsNone(address.reply_to)
+        address.revise({"reply_to_message_id": 44, "audience_user_ids": [202]})
+        self.assertEqual(address.reply_to, 22)
 
     async def test_confirmed_handoff_can_check_history_without_doing_the_web_research(self):
         from src.plugins.llm_chat import tools

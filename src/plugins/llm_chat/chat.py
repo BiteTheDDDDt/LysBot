@@ -255,8 +255,10 @@ def _get_event_message_id(event: MessageEvent) -> Optional[int]:
 def _event_message_targets(event: MessageEvent, message: str, *, user_id: int | None = None) -> tuple[MessageTarget, ...]:
     sender = getattr(event, "sender", None)
     names = tuple(name for key in ("card", "nickname") if (name := object_value(sender, key, "")))
+    reply = getattr(event, "reply", None)
+    quoted_message_id = _get_event_message_id(reply)
     current = MessageTarget(_get_event_message_id(event), user_id if user_id is not None else event.user_id,
-                            current_request_text(event, message), names, "current")
+                            current_request_text(event, message), names, "current", quoted_message_id)
     targets = [current]
     for segment in getattr(event, "original_message", None) or getattr(event, "message", ()):
         if segment.type == "at":
@@ -265,12 +267,11 @@ def _event_message_targets(event: MessageEvent, message: str, *, user_id: int | 
                 targets.append(MessageTarget(None, int(raw_id), "本轮消息原生 @ 的对象", origin="mentioned"))
     reply = getattr(event, "reply", None)
     if reply is not None:
-        message_id = _get_event_message_id(reply)
         sender_id = getattr(getattr(reply, "sender", None), "user_id", None)
-        if message_id is not None and isinstance(sender_id, int):
+        if quoted_message_id is not None and isinstance(sender_id, int):
             quoted = getattr(reply, "message", None)
             excerpt = quoted.extract_plain_text() if isinstance(quoted, Message) else ""
-            targets.append(MessageTarget(message_id, sender_id, excerpt or "本轮所引用的消息", origin="quoted"))
+            targets.append(MessageTarget(quoted_message_id, sender_id, excerpt or "本轮所引用的消息", origin="quoted"))
     return tuple(targets)
 
 
