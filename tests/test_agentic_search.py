@@ -877,8 +877,8 @@ class SearchStorageTests(unittest.IsolatedAsyncioTestCase):
         new = AgentRunner("group_7")
         new.memory_path, new.memory_generation, new.requester_id = self.manager._db_path, 0, 101
         await restore_context(new)
-        self.assertIn("SELECT name", new.transcript[0]["content"])
-        note = json.loads(new.transcript[0]["content"].split("\n", 1)[1])[0]
+        self.assertIn("SELECT name", new.working_context)
+        note = json.loads(new.working_context.split("\n", 1)[1])[0]
         self.assertEqual(note["status"], "interrupted")
         self.assertEqual(note["answer"], "")
         self.assertFalse(new.actions)
@@ -887,7 +887,7 @@ class SearchStorageTests(unittest.IsolatedAsyncioTestCase):
             other = AgentRunner("group_7")
             other.memory_path, other.memory_generation, other.requester_id = self.manager._db_path, gen, owner
             await restore_context(other)
-            self.assertFalse(other.transcript)
+            self.assertFalse(other.working_context)
 
 
 class RunnerContractTests(unittest.IsolatedAsyncioTestCase):

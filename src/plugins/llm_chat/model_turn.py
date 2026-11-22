@@ -224,6 +224,8 @@ async def run_stages(manager, messages, *, model, role, caller, session_id,
         planning_messages.append(_planning_background(background))
     if history_matches:
         planning_messages.append(history_matches)
+    if runner.working_context:
+        planning_messages.append(Message(role="user", content=runner.working_context, is_reference=True))
     if request is not None:
         planning_messages.append(replace(request, content="【本轮请求】\n" + request.content))
     plan = await manager._chat_impl(

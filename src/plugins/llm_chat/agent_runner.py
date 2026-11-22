@@ -110,6 +110,7 @@ class AgentRunner:
         self.media_delivered = False
         self.render_fallback = None
         self.context_run_ids = []
+        self.working_context = ""
         self.context_questions: list[str] = []
         self.injected_memories = []
         self.memory_correction_epoch = ""

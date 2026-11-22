@@ -21,6 +21,8 @@ def api_failure(error, *, operation):
     for markers, values in (
         (("usage_limit_reached", "insufficient_quota", "arrearage", "balance is insufficient"),
          ("quota_exhausted", "服务端额度或余额不足，立即重复请求通常无效", False)),
+        (("auth_unavailable",),
+         ("authentication_failed", "上游网关没有可用的认证", False)),
         (("invalid_api_key", "unauthorized", "authentication"),
          ("authentication_failed", "服务端拒绝身份认证", False)),
         (("timeout", "timed out"), ("timeout", "请求超时，不能据此判断没有资料", True)),

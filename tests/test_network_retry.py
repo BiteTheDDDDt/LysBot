@@ -95,6 +95,14 @@ class NetworkRetryTests(unittest.IsolatedAsyncioTestCase):
         except httpx.HTTPStatusError as error:
             self.assertEqual(retry.retry_delay(error), 25)
 
+    async def test_gateway_without_available_auth_does_not_wait_for_same_route_retry(self):
+        error = retry.ResponseError("Error code: 503 - auth_unavailable: no auth available", status_code=503)
+        request = AsyncMock(side_effect=error)
+        with self.assertRaises(retry.ResponseError):
+            await retry.request_with_retry(request, operation="test")
+        request.assert_awaited_once()
+        self.sleep.assert_not_awaited()
+
     async def test_stream_only_retries_rejected_connection_and_closes_it(self):
         attempts = 0
         def respond(request):

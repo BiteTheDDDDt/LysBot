@@ -51,7 +51,7 @@ class WorkingContextTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(followups.active(7) is not None)
             next_run = self.runner()
             await restore_context(next_run)
-            note = json.loads(next_run.transcript[-1]['content'].split('\n', 1)[1])[0]
+            note = json.loads(next_run.working_context.split('\n', 1)[1])[0]
             self.assertEqual(note['answer'], '49，跟那个模型一样凑合用')
             self.assertIn('本人旧评价', note['planning_result'])
             self.assertIn('与聊天内容无因果关系', note['planning_result'])
@@ -67,7 +67,7 @@ class WorkingContextTests(unittest.IsolatedAsyncioTestCase):
         await self.save()
         r = self.runner()
         await restore_context(r)
-        notes = json.loads(r.transcript[-1]["content"].split("\n", 1)[1])
+        notes = json.loads(r.working_context.split("\n", 1)[1])
         self.assertEqual(notes[0]["answer"], "")
         self.assertIn("直接称呼", notes[0]["planning_result"])
         state = {"final_answer": {"answer": "没发出去的全文"}, "actions": {
@@ -200,7 +200,7 @@ class WorkingContextTests(unittest.IsolatedAsyncioTestCase):
         try:
             self.assertEqual(r.context_run_ids, ["previous"])
             self.assertIn("h:0:messages:1", r.evidence)
-            self.assertIn("外号由来未知", r.transcript[-1]["content"])
+            self.assertIn("外号由来未知", r.working_context)
             self.assertEqual(r.evidence["h:0:messages:1"]["read_state"], "original")
             self.assertFalse(r.actions)
             self.assertFalse(r.cache)
@@ -216,7 +216,7 @@ class WorkingContextTests(unittest.IsolatedAsyncioTestCase):
         await self.save("reset", generation=1)
         r = self.runner()
         await restore_context(r)
-        self.assertFalse(r.transcript)
+        self.assertFalse(r.working_context)
         self.assertFalse(r.evidence)
 
     async def test_group_followup_can_restore_another_members_delivered_reply_and_errors(self):
@@ -229,10 +229,56 @@ class WorkingContextTests(unittest.IsolatedAsyncioTestCase):
         await self.db.commit()
         r = self.runner()
         await restore_context(r)
-        notes = json.loads(r.transcript[-1]["content"].split("\n", 1)[1])
+        notes = json.loads(r.working_context.split("\n", 1)[1])
         self.assertEqual(notes[0]["answer"], "图片发送失败")
         self.assertEqual(notes[0]["api_errors"][0]["code"], "invalid_size")
         self.assertFalse(r.actions)
+
+    async def test_correction_uses_the_quoted_reply_to_recover_its_original_request(self):
+        from types import SimpleNamespace
+        from unittest.mock import AsyncMock
+        from src.plugins.llm_chat.model_turn import run_stages
+        from src.plugins.llm_chat.qq_addressing import MessageTarget, QQAddressing
+        from src.plugins.llm_chat.reply_policy import ReplyPolicy
+
+        question = "抽一个给他"
+        correction = "我是说从角色池抽"
+        for rid, age, qq_message, original in (
+            ("recent", 1, 201, "另一个话题"),
+            ("quoted", 90, 101, question),
+        ):
+            state = {"requester_id": 202, "user_question": original, "actions": {
+                "reply": {"status": "sent", "text": "抽到了", "receipt": {"message_id": qq_message}},
+            }}
+            await self.db.execute("INSERT INTO agent_runs VALUES(?,?,?,?,?,?)",
+                                  (rid, "group_7", 0, "complete", json.dumps(state), time.time() - age))
+        await self.db.commit()
+        run = self.runner()
+        run.reply_policy = ReplyPolicy(addressing=QQAddressing(
+            candidates=(MessageTarget(301, 101, correction, origin="current", quoted_message_id=101),),
+        ))
+        await restore_context(run)
+        notes = json.loads(run.working_context.split("\n", 1)[1])
+        self.assertEqual([n["run_id"] for n in notes], ["quoted"])
+        self.assertEqual(notes[0]["question"], question)
+        self.assertTrue(notes[0]["quoted_by_current_request"])
+        self.assertFalse(run.transcript)
+
+        manager = SimpleNamespace(_chat_impl=AsyncMock(side_effect=[
+            models.ChatResponse("用角色池抽取"), models.ChatResponse("抽到了林"),
+        ]))
+        token = agent_runner.current_run.set(run)
+        try:
+            await run_stages(manager, [models.Message("user", correction)], model=None, role="chat",
+                             caller="test", session_id="group_7", allow_fallback=False,
+                             required_tool=None, media_followup=False)
+        finally:
+            agent_runner.current_run.reset(token)
+        planning, rendering = [call.args[0] for call in manager._chat_impl.await_args_list]
+        self.assertIn(question, planning[-2].content)
+        self.assertTrue(planning[-2].is_reference)
+        self.assertEqual(planning[-1].content, "【本轮请求】\n" + correction)
+        self.assertNotIn(question, "\n".join(m.content for m in rendering))
 
     async def test_changed_or_deleted_evidence_does_not_preserve_verified_identity(self):
         await self.save()
@@ -242,7 +288,7 @@ class WorkingContextTests(unittest.IsolatedAsyncioTestCase):
             r = self.runner()
             await restore_context(r)
             self.assertFalse(r.evidence)
-            payload = json.loads(r.transcript[-1]["content"].split("\n", 1)[1])
+            payload = json.loads(r.working_context.split("\n", 1)[1])
             self.assertIsNone(payload[0]["identity"])
             self.assertEqual(payload[0]["sources"], [])
 
@@ -254,7 +300,7 @@ class WorkingContextTests(unittest.IsolatedAsyncioTestCase):
             await restore_context(r)
         self.assertLessEqual(len(r.context_run_ids), 3)
         self.assertFalse(r.evidence)
-        payload = r.transcript[-1]["content"].split("\n", 1)[1]
+        payload = r.working_context.split("\n", 1)[1]
         self.assertLess(len(payload), 1850)
 
     async def test_web_followup_keeps_source_id_but_does_not_claim_freshness(self):
@@ -271,7 +317,7 @@ class WorkingContextTests(unittest.IsolatedAsyncioTestCase):
         await restore_context(r)
         self.assertEqual(r.evidence["w:old"]["read_state"], "recovered_lead")
         self.assertNotIn("body", r.sources["w:old"])
-        self.assertIn("previous_turn_not_refetched", r.transcript[-1]["content"])
+        self.assertIn("previous_turn_not_refetched", r.working_context)
 
     async def test_native_search_answer_and_all_citations_survive_followup(self):
         from unittest.mock import AsyncMock
@@ -293,7 +339,7 @@ class WorkingContextTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(run.final_answer["read_evidence_ids"], [first])
         fresh = self.runner()
         await restore_context(fresh)
-        note = json.loads(fresh.transcript[-1]["content"].split("\n", 1)[1])[0]
+        note = json.loads(fresh.working_context.split("\n", 1)[1])[0]
         summary = next(source for source in note["sources"] if source["id"] == first)
         self.assertEqual(summary["excerpt"], answer)
         self.assertEqual(summary["provenance"], "native_search_answer")
