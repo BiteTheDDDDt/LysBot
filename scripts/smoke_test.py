@@ -159,10 +159,14 @@ def main():
             requests.append(payload)
             messages = payload.get("messages", [])
             text = "\n".join(str(message.get("content", "")) for message in messages)
+            has_tool_results = any(message.get("role") == "tool" for message in messages)
+            is_execution_plan = has_tool_results or any(
+                tool.get("function", {}).get("name") == "smoke_owner" for tool in payload.get("tools", [])
+            )
             if "参与规划器" in text:
                 content = json.dumps({"action": "reply", "reply_mode": "sentence",
                                       "parts": [{"type": "text"}], "reason": "回应问候"})
-            elif "你负责理解本轮请求" in text:
+            elif is_execution_plan:
                 content = json.dumps({"response_mode": "factual", "verify_group_identity": False,
                                       "content": "回复问候，并给出 QQ 返回的当前群名片 磷叶石 [smoke-live-model]",
                                       "reply_mode": "sentence", "text_parts": 1,
@@ -170,7 +174,7 @@ def main():
             else:
                 content = "你好，我现在的群名片是磷叶石 [smoke-live-model]"
             message = {"role": "assistant", "content": content}
-            if "你负责理解本轮请求" in text and not any(m.get("role") == "tool" for m in messages):
+            if is_execution_plan and not has_tool_results:
                 message = {"role": "assistant", "content": None, "tool_calls": [{
                     "id": "smoke-tool-call", "type": "function",
                     "function": {"name": "smoke_owner", "arguments": "{}"},
