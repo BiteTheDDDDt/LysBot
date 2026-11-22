@@ -93,6 +93,43 @@ class SearchStorageTests(unittest.IsolatedAsyncioTestCase):
         finally:
             tools.clear_poke_context()
 
+    async def test_author_prefetch_keeps_older_assignment_when_later_mentions_fill_page(self):
+        from src.plugins.llm_chat.model_turn import _recent_author_matches
+        from src.plugins.llm_chat.model_types import current_session_id
+
+        assignment = "负责整理资料的 archivist 以后就是乙"
+        texts = ["刚提到 archivist"] * 3 + [assignment] + ["让 archivist 说两句"] * 13
+        with connect(self.manager._db_path) as db:
+            db.executemany(
+                "INSERT INTO messages_detail(session_id,role,name,sender_id,content,timestamp) VALUES(?,?,?,?,?,?)",
+                [("group_7", "user", "甲", 101, content, f"2026-09-20T10:{minute:02}:00")
+                 for minute, content in enumerate(texts)],
+            )
+        recent = await self.search.search("group_7", exact_phrase="archivist", mode="keyword",
+                                          sources=["messages"], author_ids=["101"], limit=8)
+        self.assertTrue(recent["truncated"])
+        self.assertNotIn(assignment, json.dumps(recent, ensure_ascii=False))
+        request = "你还记得archivist是谁吗"
+        runner = AgentRunner("group_7")
+        runner.memory_path = self.manager._db_path
+        run_token = current_run.set(runner)
+        session_token = current_session_id.set("group_7")
+        tools.set_poke_context(7, 101, current_user_text=request)
+        try:
+            await runner.start([models.Message("user", request)])
+            with patch.object(memory_module, "memory_manager", self.manager):
+                background = await _recent_author_matches(runner)
+            self.assertTrue(background.is_reference)
+            records = json.loads(background.content.splitlines()[1])
+            self.assertEqual(len(records), 8)
+            self.assertIn(assignment, [item["text"] for item in records])
+            self.assertEqual(runner.tool_calls, 2)
+        finally:
+            await runner.finish("complete")
+            tools.clear_poke_context()
+            current_session_id.reset(session_token)
+            current_run.reset(run_token)
+
     async def test_author_filter_never_returns_other_speakers_text(self):
         found = await self.search.search("group_7", query="RTX", mode="keyword", author_ids=["101"])
         self.assertTrue(found["items"])

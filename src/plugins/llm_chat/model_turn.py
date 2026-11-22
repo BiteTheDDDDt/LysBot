@@ -123,15 +123,29 @@ async def _recent_author_matches(runner):
                key=len, default="")
     if not term:
         return None
-    args = json.dumps({"exact_phrase": term, "mode": "keyword", "sources": ["messages"],
-                       "author_ids": [runner.requester_id], "roles": ["user"], "limit": 8})
+    filters = {"exact_phrase": term, "mode": "keyword", "sources": ["messages"],
+               "author_ids": [runner.requester_id], "roles": ["user"]}
+    recent, earlier = [], []
     try:
         async with asyncio.timeout(2.0):
-            result = json.loads(await runner.execute("recall_history", args, execute_tool))
+            result = json.loads(await runner.execute(
+                "recall_history", json.dumps({**filters, "limit": 8}), execute_tool,
+            ))
+            recent = result.get("items", [])
+            # Repeated later mentions can fill the page while the first
+            # mention still explains what the term refers to.
+            if result.get("truncated") and runner.tool_calls + 1 < config.agent_max_tool_calls:
+                older_page = await runner.execute(
+                    "recall_history", json.dumps({**filters, "sort": "oldest", "limit": 4}), execute_tool,
+                )
+                earlier = json.loads(older_page).get("items", [])
     except (TimeoutError, ValueError):
-        return None
-    records = [{"id": item["id"], "time": item.get("event_time"), "text": item.get("excerpt", "")[:240]}
-               for item in result.get("items", [])]
+        pass  # If the older lookup times out, keep the first page.
+    selected = {item["id"]: item for item in [*earlier, *recent]}
+    records = [
+        {"id": item["id"], "time": item.get("event_time"), "text": item.get("excerpt", "")[:240]}
+        for item in list(selected.values())[:8]
+    ]
     if records:
         return Message(role="user", is_reference=True, content=(
             "【本群同一发言者此前提到的相关原话，仅作指代线索】\n" + json.dumps(records, ensure_ascii=False)
