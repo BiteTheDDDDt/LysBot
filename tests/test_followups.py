@@ -24,18 +24,19 @@ class FollowupTests(unittest.IsolatedAsyncioTestCase):
     def open(self):
         followups.answered(7, "因为输入格式不同。", direct=True)
 
-    def test_three_replies_do_not_extend_deadline(self):
-        self.open()
-        deadline = followups.windows[7].expires
-        quiet_deadline = followups.windows[7].quiet_expires
-        for i in range(3):
-            self.assertIsNotNone(followups.active(7))
-            followups.answered(7, "补充说明", direct=False)
-            self.assertEqual(followups.windows[7].expires, deadline)
-            self.assertEqual(followups.windows[7].quiet_expires, quiet_deadline)
-            if i < 2:
-                self.assertEqual(followups.windows[7].remaining, 2 - i)
-        self.assertIsNone(followups.active(7))
+    def test_implicit_replies_refresh_the_same_window_without_a_turn_limit(self):
+        with patch.object(followups.time, "monotonic", return_value=100):
+            self.open()
+            window = followups.windows[7]
+            self.event._llm_followup_window = window
+        for i in range(1, 6):
+            now = 100 + 150 * i
+            with patch.object(followups.time, "monotonic", return_value=now):
+                self.assertTrue(chat._eligible_event_followup(self.event))
+                followups.answered(7, f"补充说明 {i}", direct=False)
+                self.assertIs(followups.active(7), window)
+                self.assertEqual(window.expires, now + 600)
+        self.assertEqual(window.answer, "补充说明 5")
 
     def test_expiry_and_group_isolation(self):
         with patch.object(followups.time, "monotonic", return_value=100):
@@ -46,19 +47,16 @@ class FollowupTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(followups.time, "monotonic", return_value=701):
             self.assertIsNone(followups.active(7))
 
-    def test_interruption_removes_quiet_grace_without_extending_normal_window(self):
+    def test_late_skip_leaves_time_for_a_followup_without_renewing_the_window(self):
         with patch.object(followups.time, "monotonic", return_value=100):
             self.open()
-        with patch.object(followups.time, "monotonic", return_value=150):
+        with patch.object(followups.time, "monotonic", return_value=350):
             followups.skip(7)
-            self.assertIsNotNone(followups.active(7))
-        with patch.object(followups.time, "monotonic", return_value=221):
-            self.assertIsNone(followups.active(7))
-        with patch.object(followups.time, "monotonic", return_value=300):
-            self.open()
-        with patch.object(followups.time, "monotonic", return_value=523):
+            self.assertEqual(followups.active(7).expires, 470)
+        with patch.object(followups.time, "monotonic", return_value=360):
             followups.skip(7)
-            self.assertIsNone(followups.active(7))
+            self.assertEqual(followups.active(7).expires, 470)
+        with patch.object(followups.time, "monotonic", return_value=471):
             self.assertIsNone(followups.active(7))
 
     def test_zero_window_still_disables_implicit_followups(self):
@@ -66,14 +64,14 @@ class FollowupTests(unittest.IsolatedAsyncioTestCase):
             self.open()
         self.assertIsNone(followups.active(7))
 
-    def test_unrelated_turns_do_not_close_window_immediately(self):
+    def test_implicit_followup_remains_eligible_after_several_skipped_turns(self):
         self.open()
-        followups.skip(7)
-        self.assertIsNotNone(followups.active(7))
-        followups.skip(7)
-        self.assertIsNotNone(followups.active(7))
-        followups.skip(7)
-        self.assertIsNone(followups.active(7))
+        window = followups.active(7)
+        self.event._llm_followup_window = window
+        for _ in range(5):
+            followups.skip(7)
+        self.assertTrue(chat._eligible_event_followup(self.event))
+        self.assertEqual(window.answer, "因为输入格式不同。")
 
     def test_explicit_other_target_and_close_stop_continuation(self):
         self.open()
@@ -121,16 +119,18 @@ class FollowupTests(unittest.IsolatedAsyncioTestCase):
                     if should_send:
                         bot.send.assert_awaited_once_with(event, '把代码发来，我看看')
                         generate.assert_awaited_once()
-                        self.assertEqual(window.remaining, 2)
-                        self.assertEqual(window.quiet_expires, 700)
+                        self.assertEqual(window.expires, 923)
+                        self.assertEqual(window.answer, '把代码发来，我看看')
                     else:
                         bot.send.assert_not_awaited()
                         generate.assert_not_awaited()
-                        self.assertEqual(window.interruptions, 1)
-                        self.assertEqual(window.remaining, 3)
+                        self.assertEqual(window.expires, 443)
+                        self.assertEqual(window.answer, '哦vllm sglang这个我有点感兴趣，怎么参与？')
 
     async def test_implicit_single_can_stay_silent_even_when_reply_judge_disabled(self):
         self.open()
+        window = followups.active(7)
+        deadline = window.expires
         with (
             patch.object(chat, "GroupMessageEvent", SimpleNamespace),
             patch.object(chat.config, "enable_reply_judge", False),
@@ -139,7 +139,8 @@ class FollowupTests(unittest.IsolatedAsyncioTestCase):
             await chat.handle_single_chat(object(), self.event, "那为什么呢", [], [])
         self.assertFalse(plan.await_args.kwargs["is_direct"])
         self.assertEqual(plan.await_args.kwargs["default_action"], "silent")
-        self.assertEqual(followups.active(7).interruptions, 1)
+        self.assertIs(followups.active(7), window)
+        self.assertLess(window.expires, deadline)
 
     async def test_implicit_batch_can_stay_silent_without_generating(self):
         self.open()

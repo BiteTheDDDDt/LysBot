@@ -141,7 +141,7 @@ class PlannerMediaTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("好，我记下了", prompt)
         self.assertIn("当前消息:\n那就念给我听", prompt)
         self.assertIn("可选 action：reply | close | silent | wait", prompt)
-        self.assertIn("不按三轮机械收尾", prompt)
+        self.assertIn("这句没必要接时用 silent", prompt)
         self.assertIn('"parts"', prompt)
         self.assertNotIn("meme", prompt)
         self.assertNotIn('"response_shape"', prompt)

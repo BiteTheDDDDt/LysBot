@@ -133,7 +133,6 @@ class RuntimeConfig(Config):
     agent_progress_interval: float = 20.0
     agent_progress_max_messages: int = 2
     followup_window_seconds: float = 120.0
-    followup_max_turns: int = 3
     summary_total_timeout: float = 60.0
     background_llm_total_timeout: float = 120.0
     context_max_chars: int = 18000
