@@ -144,6 +144,7 @@ async def run_stages(manager, messages, *, model, role, caller, session_id,
     request = current_user_message(messages)
     instructions = [m for m in messages if m.role == "system"]
     background = [m for m in messages if m is not request and m.role != "system" and not m.is_thinking]
+    proactive = getattr(runner.reply_policy, "scene", None) == "proactive"
     addressing = getattr(runner.reply_policy, "addressing", None)
     if addressing is not None and addressing.candidates:
         planning_address_message = Message(role="system", content=(
@@ -176,7 +177,8 @@ async def run_stages(manager, messages, *, model, role, caller, session_id,
     if runner.working_context:
         planning_messages.append(Message(role="user", content=runner.working_context, is_reference=True))
     if request is not None:
-        planning_messages.append(replace(request, content="【本轮请求】\n" + request.content))
+        label = "【本轮群聊消息】\n" if proactive else "【本轮请求】\n"
+        planning_messages.append(replace(request, content=label + request.content))
     plan = await manager._chat_impl(
         planning_messages, model=None, role="planner", caller=caller + ":plan",
         session_id=session_id, allow_fallback=allow_fallback,
@@ -191,7 +193,7 @@ async def run_stages(manager, messages, *, model, role, caller, session_id,
     runner.planning_result = str(plan)[:4000]
     await runner.checkpoint()
     await runner.validate_scope()
-    if runner.reply_policy and runner.reply_policy.scene == "proactive" and not runner.should_reply:
+    if proactive and not runner.should_reply:
         general_logger.info("[主动发言] 执行规划决定放弃本轮参与，未发送消息")
         return ChatResponse("", usage=getattr(plan, "usage", None))
     # The execution planner has the latest context and can shorten or expand
@@ -239,7 +241,8 @@ async def run_stages(manager, messages, *, model, role, caller, session_id,
         )),
     ])
     if request is not None:
-        rendering_messages.append(Message(role="user", content="用户本轮问题：" + request.content))
+        label = "群聊触发消息：" if proactive else "用户本轮问题："
+        rendering_messages.append(Message(role="user", content=label + request.content))
     try:
         result = await manager._chat_impl(
             rendering_messages, model=model, role="chat", caller=caller + ":render",

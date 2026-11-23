@@ -122,6 +122,8 @@ class RoleSeparationTests(unittest.IsolatedAsyncioTestCase):
             ("不知道具体指哪个服务，问一句确认", False),
             (json.dumps({"response_mode": "mixed", "verify_group_identity": False,
                          "content": "缺少关键信息", "should_reply": False}), False),
+            (json.dumps({"response_mode": "social", "verify_group_identity": False,
+                         "content": "群友正在讲自己的经历，先听下去", "should_reply": False}), False),
             (json.dumps({"response_mode": "mixed", "verify_group_identity": False,
                          "content": "缺少关键信息"}), False),
             (json.dumps({"response_mode": "mixed", "verify_group_identity": False,
@@ -143,6 +145,31 @@ class RoleSeparationTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(str(result), "在维护呢" if approved else "")
                 self.assertEqual(result.agent_run.should_reply, approved)
                 self.assertEqual(get_adapter.call_count, 2 if approved else 1)
+
+    async def test_proactive_rendering_keeps_the_planned_question_and_labels_the_group_message(self):
+        from src.plugins.llm_chat.agent_runner import current_run
+        from src.plugins.llm_chat.reply_policy import PROACTIVE_REPLY
+
+        manager = models.ModelManager()
+        statement = "这面包又被我们聊成哲学问题了"
+        planned_question = "所以空心的面包算不算填满了空气？"
+
+        async def call(messages, **kwargs):
+            if kwargs["role"] == "planner":
+                self.assertEqual(messages[-1].content, "【本轮群聊消息】\n" + statement)
+                run = current_run.get()
+                run.should_reply = True
+                run.response_mode = "social"
+                return models.ChatResponse(planned_question)
+            self.assertEqual(messages[-1].content, "群聊触发消息：" + statement)
+            handoff = json.loads(messages[-2].content.splitlines()[2])
+            self.assertEqual(handoff["content"], planned_question)
+            return models.ChatResponse(planned_question)
+
+        with patch.object(manager, "_chat_impl", side_effect=call) as calls:
+            result = await manager.run_turn([models.Message("user", statement)], reply_policy=PROACTIVE_REPLY)
+        self.assertEqual(result, planned_question)
+        self.assertEqual(calls.await_count, 2)
 
     async def test_social_renderer_keeps_dialogue_instead_of_reference_payloads(self):
         from src.plugins.llm_chat.agent_runner import current_run
