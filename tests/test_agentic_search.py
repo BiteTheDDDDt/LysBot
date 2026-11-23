@@ -93,75 +93,6 @@ class SearchStorageTests(unittest.IsolatedAsyncioTestCase):
         finally:
             tools.clear_poke_context()
 
-    async def test_author_prefetch_keeps_older_assignment_when_later_mentions_fill_page(self):
-        from src.plugins.llm_chat.model_turn import _recent_author_matches
-        from src.plugins.llm_chat.model_types import current_session_id
-
-        assignment = "负责整理资料的 archivist 以后就是乙"
-        texts = ["刚提到 archivist"] * 3 + [assignment] + ["让 archivist 说两句"] * 13
-        with connect(self.manager._db_path) as db:
-            db.executemany(
-                "INSERT INTO messages_detail(session_id,role,name,sender_id,content,timestamp) VALUES(?,?,?,?,?,?)",
-                [("group_7", "user", "甲", 101, content, f"2026-09-20T10:{minute:02}:00")
-                 for minute, content in enumerate(texts)],
-            )
-        recent = await self.search.search("group_7", exact_phrase="archivist", mode="keyword",
-                                          sources=["messages"], author_ids=["101"], limit=8)
-        self.assertTrue(recent["truncated"])
-        self.assertNotIn(assignment, json.dumps(recent, ensure_ascii=False))
-        request = "你还记得archivist是谁吗"
-        runner = AgentRunner("group_7")
-        runner.memory_path = self.manager._db_path
-        run_token = current_run.set(runner)
-        session_token = current_session_id.set("group_7")
-        tools.set_poke_context(7, 101, current_user_text=request)
-        try:
-            await runner.start([models.Message("user", request)])
-            with patch.object(memory_module, "memory_manager", self.manager):
-                background = await _recent_author_matches(runner)
-            self.assertTrue(background.is_reference)
-            records = json.loads(background.content.splitlines()[1])
-            self.assertEqual(len(records), 8)
-            self.assertIn(assignment, [item["text"] for item in records])
-            self.assertEqual(runner.tool_calls, 2)
-        finally:
-            await runner.finish("complete")
-            tools.clear_poke_context()
-            current_session_id.reset(session_token)
-            current_run.reset(run_token)
-
-    async def test_proactive_prefetch_resolves_short_name_from_another_group_member(self):
-        from src.plugins.llm_chat.model_turn import _recent_author_matches
-        from src.plugins.llm_chat.model_types import current_session_id
-        from src.plugins.llm_chat.reply_policy import PROACTIVE_REPLY
-
-        question = "为什么Q7周末还是这么卡"
-        reference = "Q7 是论坛的简称"
-        with connect(self.manager._db_path) as db:
-            db.executemany(
-                "INSERT INTO messages_detail(session_id,role,name,sender_id,content,timestamp) VALUES(?,?,?,?,?,?)",
-                [("group_7", "user", "乙", 202, reference, "2026-09-20T10:00:00"),
-                 ("group_7", "user", "甲", 101, question, "2026-09-20T10:01:00"),
-                 ("group_8", "user", "乙", 202, "Q7 外群内容", "2026-09-20T10:02:00")],
-            )
-        runner = AgentRunner("group_7")
-        runner.memory_path = self.manager._db_path
-        runner.reply_policy = PROACTIVE_REPLY
-        run_token = current_run.set(runner)
-        session_token = current_session_id.set("group_7")
-        tools.set_poke_context(7, 101, current_user_text=question, history_request_texts=[question])
-        try:
-            await runner.start([models.Message("user", question)])
-            with patch.object(memory_module, "memory_manager", self.manager):
-                background = await _recent_author_matches(runner)
-            records = json.loads(background.content.splitlines()[1])
-            self.assertEqual([item["text"] for item in records], [reference])
-        finally:
-            await runner.finish("complete")
-            tools.clear_poke_context()
-            current_session_id.reset(session_token)
-            current_run.reset(run_token)
-
     async def test_author_filter_never_returns_other_speakers_text(self):
         found = await self.search.search("group_7", query="RTX", mode="keyword", author_ids=["101"])
         self.assertTrue(found["items"])
@@ -407,6 +338,33 @@ class SearchStorageTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(found["error"]["code"], "scope_changed_retry_search")
         self.assertTrue(found["error"]["retryable"])
         self.assertFalse(found["items"])
+
+    async def test_appending_during_embedding_keeps_first_page_but_invalidates_pagination(self):
+        vector = struct.pack("<512f", 1, *([0] * 511))
+
+        async def embedding_with_concurrent_append(*args, **kwargs):
+            with connect(self.manager._db_path) as db:
+                db.execute(
+                    "INSERT INTO messages_detail(session_id,role,content,timestamp) VALUES(?,?,?,?)",
+                    ("group_7", "user", "不相关的新消息", "2026-09-16T00:00:00"),
+                )
+            return [vector]
+
+        query = {"query": "RTX", "mode": "hybrid", "sources": ["messages"], "limit": 1}
+        with patch("src.plugins.llm_chat.retrieval.embed", AsyncMock(side_effect=embedding_with_concurrent_append)):
+            first = await self.search.search("group_7", **query)
+        self.assertNotIn("error", first)
+        self.assertEqual(first["items"][0]["id"], "h:0:messages:3")
+        self.assertTrue(first["truncated"])
+        self.assertIsNone(first["next_cursor"])
+
+        with patch("src.plugins.llm_chat.retrieval.embed", AsyncMock(return_value=[vector])):
+            stable = await self.search.search("group_7", **query)
+        self.assertTrue(stable["next_cursor"])
+        with patch("src.plugins.llm_chat.retrieval.embed", AsyncMock(side_effect=embedding_with_concurrent_append)):
+            continued = await self.search.search("group_7", cursor=stable["next_cursor"], **query)
+        self.assertEqual(continued["error"]["code"], "scope_changed_retry_search")
+        self.assertFalse(continued["items"])
 
     async def test_new_message_id_and_fact_provenance_are_committed(self):
         with patch.object(memory_module.config, "enable_summary", False):

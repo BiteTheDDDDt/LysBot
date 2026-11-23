@@ -27,8 +27,8 @@ class FollowupTests(unittest.IsolatedAsyncioTestCase):
     def test_implicit_replies_refresh_the_same_window_without_a_turn_limit(self):
         with patch.object(followups.time, "monotonic", return_value=100):
             self.open()
-            window = followups.windows[7]
-            self.event._llm_followup_window = window
+            window = followups.active(7)
+            self.event._llm_followup_snapshot = followups.snapshot(7)
         for i in range(1, 6):
             now = 100 + 150 * i
             with patch.object(followups.time, "monotonic", return_value=now):
@@ -67,7 +67,7 @@ class FollowupTests(unittest.IsolatedAsyncioTestCase):
     def test_implicit_followup_remains_eligible_after_several_skipped_turns(self):
         self.open()
         window = followups.active(7)
-        self.event._llm_followup_window = window
+        self.event._llm_followup_snapshot = followups.snapshot(7)
         for _ in range(5):
             followups.skip(7)
         self.assertTrue(chat._eligible_event_followup(self.event))
@@ -93,7 +93,8 @@ class FollowupTests(unittest.IsolatedAsyncioTestCase):
                 followups.windows.clear()
                 with patch.object(followups.time, 'monotonic', return_value=100):
                     followups.answered(7, '哦vllm sglang这个我有点感兴趣，怎么参与？', direct=True)
-                window = followups.windows[7]
+                with patch.object(followups.time, "monotonic", return_value=323):
+                    window = followups.active(7)
                 event = SimpleNamespace(group_id=7, user_id=55, self_id=999, to_me=False, message=Message(message), get_plaintext=lambda: message, sender=SimpleNamespace(card='甲', nickname='甲'))
                 resolved = chat.ResolvedIncomingMessage(plain_text=message)
                 bot = SimpleNamespace(send=AsyncMock())
@@ -104,10 +105,10 @@ class FollowupTests(unittest.IsolatedAsyncioTestCase):
                 generate = AsyncMock(return_value='把代码发来，我看看')
                 plan_call = AsyncMock(return_value=json.dumps({'action': 'reply', 'parts': [{'type': 'text'}], 'followup_target': target, 'followup_evidence': evidence}))
                 with ExitStack() as stack:
-                    for patcher in (patch.object(followups.time, 'monotonic', return_value=323), patch.object(chat, 'GroupMessageEvent', SimpleNamespace), patch.object(chat, 'resolve_incoming_message', AsyncMock(return_value=resolved)), patch.object(chat, 'download_images_as_base64', AsyncMock(return_value=[])), patch.object(chat, '_capture_incoming_images', return_value=[]), patch.object(chat.config, 'enable_group_repeat', False), patch.object(chat.memory_manager, 'add_message', AsyncMock(side_effect=stored_message)), patch.object(chat.memory_manager, 'enrich_message', AsyncMock(return_value=True)), patch.object(chat.memory_manager, 'get_history', AsyncMock(return_value=[])), patch.object(chat.memory_manager, 'get_session_model', return_value='test-model'), patch.object(chat.proactive_manager, 'add_recent_message'), patch.object(chat.proactive_manager, 'increment_counter'), patch.object(chat.proactive_manager, 'is_explicitly_muted', return_value=False, create=True), patch.object(chat.proactive_manager, 'is_on_cooldown', return_value=True), patch.object(chat.proactive_manager, 'try_proactive', proactive), patch.object(chat.proactive_manager, 'mark_just_spoke'), patch.object(planner, '_resolve_planner_context', AsyncMock(return_value='')), patch.object(planner.model_manager, 'chat', plan_call), patch.object(chat, 'execute_planned_side_effect', AsyncMock()), patch.object(chat, 'prepare_planned_meme', AsyncMock(return_value=None)), patch.object(chat, 'build_context_messages', AsyncMock(return_value=[])), patch.object(chat.model_manager, 'run_turn', generate), patch.object(chat, '_finalize_immediate_tool_turn', AsyncMock(return_value=False)), patch('src.plugins.llm_chat.model_identity.update_group_card_for_response', AsyncMock())):
+                    for patcher in (patch.object(followups.time, 'monotonic', return_value=323), patch.object(chat, 'GroupMessageEvent', SimpleNamespace), patch.object(chat, 'resolve_incoming_message', AsyncMock(return_value=resolved)), patch.object(chat, 'download_images_as_base64', AsyncMock(return_value=[])), patch.object(chat, '_capture_incoming_images', return_value=[]), patch.object(chat.config, 'enable_group_repeat', False), patch.object(chat.memory_manager, 'add_message', AsyncMock(side_effect=stored_message)), patch.object(chat.memory_manager, 'enrich_message', AsyncMock(return_value=True)), patch.object(chat.memory_manager, 'get_history', AsyncMock(return_value=[])), patch.object(chat.memory_manager, 'get_session_model', return_value='test-model'), patch.object(chat.proactive_manager, 'add_recent_message'), patch.object(chat.proactive_manager, 'is_explicitly_muted', return_value=False, create=True), patch.object(chat.proactive_manager, 'try_proactive', proactive), patch.object(chat.proactive_manager, 'mark_just_spoke'), patch.object(planner, '_resolve_planner_context', AsyncMock(return_value='')), patch.object(planner.model_manager, 'chat', plan_call), patch.object(chat, 'execute_planned_side_effect', AsyncMock()), patch.object(chat, 'prepare_planned_meme', AsyncMock(return_value=None)), patch.object(chat, 'build_context_messages', AsyncMock(return_value=[])), patch.object(chat.model_manager, 'run_turn', generate), patch.object(chat, '_finalize_immediate_tool_turn', AsyncMock(return_value=False)), patch('src.plugins.llm_chat.model_identity.update_group_card_for_response', AsyncMock())):
                         stack.enter_context(patcher)
                     await chat.record_group_message(bot, event)
-                    self.assertIs(event._llm_followup_window, window)
+                    self.assertEqual(list(event._llm_followup_snapshot.values()), [window.answer])
                     self.assertTrue(await chat.should_respond(event))
                     await chat.handle_single_chat(bot, event, message, [], [])
                     proactive.assert_not_awaited()
@@ -196,7 +197,7 @@ class FollowupTests(unittest.IsolatedAsyncioTestCase):
 
         def stored_message(_user_id, role, content, *args, **kwargs):
             return LLMMessage(role=role, content=content, source_id=1, timestamp=kwargs.get('timestamp'))
-        with patch.object(chat, 'GroupMessageEvent', SimpleNamespace), patch.object(chat, 'resolve_incoming_message', AsyncMock(return_value=resolved)), patch.object(chat, 'download_images_as_base64', AsyncMock(return_value=[])), patch.object(chat, '_capture_incoming_images', return_value=[]), patch.object(chat.config, 'enable_group_repeat', False), patch.object(chat.memory_manager, 'add_message', AsyncMock(side_effect=stored_message)), patch.object(chat.memory_manager, 'enrich_message', AsyncMock(return_value=True)) as enriched, patch.object(chat.proactive_manager, 'add_recent_message'), patch.object(chat.proactive_manager, 'increment_counter'), patch.object(chat.proactive_manager, 'try_proactive', AsyncMock(side_effect=proactive_reply)) as proactive, patch.object(chat, 'plan_chat_action', AsyncMock()) as plan:
+        with patch.object(chat, 'GroupMessageEvent', SimpleNamespace), patch.object(chat, 'resolve_incoming_message', AsyncMock(return_value=resolved)), patch.object(chat, 'download_images_as_base64', AsyncMock(return_value=[])), patch.object(chat, '_capture_incoming_images', return_value=[]), patch.object(chat.config, 'enable_group_repeat', False), patch.object(chat.memory_manager, 'add_message', AsyncMock(side_effect=stored_message)), patch.object(chat.memory_manager, 'enrich_message', AsyncMock(return_value=True)) as enriched, patch.object(chat.proactive_manager, 'add_recent_message'), patch.object(chat.proactive_manager, 'try_proactive', AsyncMock(side_effect=proactive_reply)) as proactive, patch.object(chat, 'plan_chat_action', AsyncMock()) as plan:
             await chat.record_group_message(object(), self.event)
             self.assertIn('xp是自由的', enriched.await_args.args[2])
             proactive.assert_awaited_once()
@@ -207,14 +208,50 @@ class FollowupTests(unittest.IsolatedAsyncioTestCase):
             await chat.handle_merged_chat(object(), 7, [pending])
             plan.assert_not_awaited()
             next_event = SimpleNamespace(**vars(self.event))
-            next_event._llm_followup_window = followups.active(7)
+            next_event._llm_followup_snapshot = followups.snapshot(7)
             self.assertTrue(await chat.should_respond(next_event))
             self.event.to_me = True
             self.assertTrue(await chat.should_respond(self.event))
 
-    def test_replacement_window_does_not_revive_old_queued_followup(self):
+    def test_independent_reply_does_not_remove_earlier_queued_followup(self):
         self.open()
-        self.event._llm_followup_window = followups.active(7)
+        self.event._llm_followup_snapshot = followups.snapshot(7)
         self.assertTrue(chat._eligible_event_followup(self.event))
         followups.answered(7, "另一次对话的回答", direct=True)
-        self.assertFalse(chat._eligible_event_followup(self.event))
+        self.assertTrue(chat._eligible_event_followup(self.event))
+        self.assertEqual(list(chat._event_followups(self.event).values()), ["因为输入格式不同。"])
+
+    def test_closing_one_topic_keeps_the_other(self):
+        followups.answered(7, "甲的讨论", direct=True, message_ids=[123])
+        followups.answered(7, "乙的讨论", direct=True, message_ids=[124])
+        first = followups.quoted_anchor(7, 123)
+        self.assertIsNotNone(first)
+        followups.answered(7, "那先这样", direct=False, closed=True, anchor_id=first)
+        self.assertEqual(list(followups.snapshot(7).values()), ["乙的讨论"])
+        self.assertIsNotNone(followups.quoted_anchor(7, 124))
+
+    async def test_aggregated_plain_supplement_is_separate_from_direct_request(self):
+        manager = chat.proactive_manager
+        direct = self.event
+        direct.to_me = True
+        direct.message_id = 10
+        direct._llm_received_at = 100
+        direct._llm_memory_source_id = 52
+        direct.get_plaintext = lambda: "查预算"
+        pending = chat.PendingMessage(42, "甲", "查预算", direct)
+        chat_context = SimpleNamespace(
+            message_id=11, user_id=42, sender_name="甲", content="按300元算",
+        )
+        plan = AsyncMock(return_value=PlannerDecision(action="silent"))
+        with (
+            patch.object(manager, "get_nearby_unaddressed", return_value=[chat_context]) as lookup,
+            patch.object(chat, "plan_chat_action", plan),
+            patch.object(chat.config, "enable_reply_judge", True),
+        ):
+            await chat.handle_merged_chat(object(), 7, [pending], _collected_until=110)
+        lookup.assert_called_once_with(7, 100, 110)
+        fields = plan.await_args.kwargs
+        self.assertNotIn("按300元算", fields["current_message"])
+        self.assertEqual(json.loads(fields["nearby_context"]),
+                         [{"message_id": 11, "user_id": 42, "name": "甲", "text": "按300元算"}])
+        self.assertEqual(fields["current_source_ids"], (52,))

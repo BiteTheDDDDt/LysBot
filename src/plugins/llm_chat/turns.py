@@ -145,6 +145,7 @@ def build_turn_items(
         if len(paragraphs) == 2 and all(p.strip() for p in paragraphs):
             return [("text", p.strip().rstrip("。")) for p in paragraphs]
     if (group_chat and reply_policy.scene in {"chat", "multiuser", "proactive", "poke"}
+            and reply_policy.text_parts is None
             and not reply_policy.detailed and not reply_policy.tiny and not planned_meme
             and len(clean_text) <= reply_policy.max_chars
             and (not decision or (decision.parts and all(p.type == "text" for p in decision.parts)))):

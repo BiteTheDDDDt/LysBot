@@ -96,6 +96,20 @@ class IdentityGuardTests(unittest.IsolatedAsyncioTestCase):
             "evidence_ids": ["h:0:messages:4"], "relation": "reply_address"})
         self.assertEqual(await self.verify(), "是 QQ 20202。")
 
+    async def test_requested_explanation_keeps_only_the_cited_original_quote(self):
+        await self.lead()
+        self.run.user_question = "R姐是谁，有原话吗"
+        quote = {"id": "h:0:messages:1", "text": "R姐要这个吗"}
+        self.run.step.return_value = response({**self.verdict, "evidence_quote": quote})
+        answer = await self.verify()
+        self.assertEqual(answer, "是RiverFox。依据是群里这句原话：「R姐要这个吗」")
+        await self.run.finish("complete", answer)
+        self.assertEqual(self.run.final_answer["evidence_ids"], ["h:0:messages:1"])
+        self.run.step.return_value = response({
+            **self.verdict, "evidence_quote": {**quote, "text": "不存在的说法"},
+        })
+        self.assertEqual(await self.verify(), "是RiverFox。")
+
     async def test_invalid_or_unrelated_account_and_citation_fail_closed(self):
         await self.lead()
         for verdict in [

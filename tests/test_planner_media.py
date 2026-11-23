@@ -1,3 +1,4 @@
+import json
 import unittest
 from unittest.mock import AsyncMock, patch
 
@@ -69,6 +70,24 @@ class PlannerMediaTests(unittest.IsolatedAsyncioTestCase):
                     )
                     self.assertEqual([part.type for part in decision.parts], ["text"])
 
+    async def test_selects_existing_followup_anchor_instead_of_assuming_latest(self):
+        with (
+            patch.object(planner, "_resolve_planner_context", AsyncMock(return_value="")),
+            patch.object(planner.model_manager, "chat", AsyncMock()) as model,
+        ):
+            for anchor, expected in (("17", "reply"), ("99", "silent")):
+                model.return_value = json.dumps({
+                    "action": "reply", "followup_target": "bot",
+                    "followup_evidence": "问旧方案的限制", "followup_anchor_id": anchor,
+                })
+                decision = await planner.plan_chat_action(
+                    session_id="group_7", group_id=7, current_message="那个方案还能改吗",
+                    is_direct=False, followup_context="17: 旧方案\n19: 其他问题",
+                    followup_anchors=(17, 19),
+                )
+                self.assertEqual(decision.action, expected)
+                self.assertEqual(decision.followup_anchor, 17 if expected == "reply" else None)
+
     def test_planner_log_preview_keeps_recent_context_visible(self):
         prompt = (
             "规划规则" * 1000
@@ -92,19 +111,21 @@ class PlannerMediaTests(unittest.IsolatedAsyncioTestCase):
                 content="【生成图片 model=test】实际画面：蓝色汉服自拍",
             ),
             planner.LLMMessage(role="assistant", content="内部判断", is_thinking=True),
-            planner.LLMMessage(role="user", content="【群员-甲】 按刚才那个来", name="甲"),
+            planner.LLMMessage(role="user", content="【群员-乙】 按刚才那个来", name="乙", source_id=101),
+            planner.LLMMessage(role="user", content="【群员-甲】 按刚才那个来", name="甲", source_id=102),
         ]
 
         context = planner._format_planner_history(
             history,
-            current_message="按刚才那个来",
+            current_source_ids=(102,),
             max_chars=6000,
         )
 
         self.assertIn("我喜欢蓝色", context)
         self.assertIn("蓝色汉服自拍", context)
         self.assertNotIn("内部判断", context)
-        self.assertNotIn("按刚才那个来", context)
+        self.assertIn("【群员-乙】 按刚才那个来", context)
+        self.assertNotIn("【群员-甲】 按刚才那个来", context)
 
     async def test_planner_prompt_loads_recent_session_history(self):
         recent = [

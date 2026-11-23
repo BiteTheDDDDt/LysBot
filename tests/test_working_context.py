@@ -95,45 +95,6 @@ class WorkingContextTests(unittest.IsolatedAsyncioTestCase):
         MemoryManager._instance = None
         self.tmp.cleanup()
 
-    async def test_group_request_prefetches_older_source_from_same_author_only(self):
-        from src.plugins.llm_chat import tools
-        from src.plugins.llm_chat.model_turn import _recent_author_matches
-
-        sid = "group_7"
-        request = "让你的relaybot讲个段子"
-        await self.db.executemany(
-            "INSERT INTO messages_detail(session_id,role,name,sender_id,content,timestamp) VALUES(?,?,?,?,?,?)",
-            [(group, "user", "成员", author, content, "2026-09-01T10:00:00") for group, author, content in (
-                (sid, 101, "以后 relaybot 指 @团子(QQ:707)"),
-                (sid, 101, request),
-                (sid, 202, "别人的 relaybot"),
-                ("group_8", 101, "另一个群的 relaybot"),
-            )],
-        )
-        await self.db.commit()
-        tools.set_poke_context(group_id=7, user_id=101, current_user_text=request,
-                               history_request_texts=[request])
-        token = models.current_session_id.set(sid)
-        try:
-            with patch.object(agent_runner, "_runtime_path", self.manager._db_path), \
-                 patch("src.plugins.llm_chat.memory.memory_manager", self.manager):
-                runner = agent_runner.AgentRunner(sid, 60)
-                await runner.start([models.Message("user", request, sender_id=101)])
-                run_token = agent_runner.current_run.set(runner)
-                try:
-                    reference = await _recent_author_matches(runner)
-                    self.assertTrue(reference.is_reference)
-                    self.assertIn("QQ:707", reference.content)
-                    self.assertNotIn(request, reference.content)
-                    self.assertNotIn("别人的", reference.content)
-                    self.assertNotIn("另一个群", reference.content)
-                    await runner.finish("complete")
-                finally:
-                    agent_runner.current_run.reset(run_token)
-        finally:
-            models.current_session_id.reset(token)
-            tools.clear_poke_context()
-
     async def test_reply_model_survives_reload_and_history_retrieval(self):
         from src.plugins.llm_chat.context_builder import _format_history_message
         with patch.object(self.manager, '_schedule_summary'):
@@ -234,7 +195,7 @@ class WorkingContextTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(notes[0]["api_errors"][0]["code"], "invalid_size")
         self.assertFalse(r.actions)
 
-    async def test_correction_uses_the_quoted_reply_to_recover_its_original_request(self):
+    async def test_correction_recovers_quoted_request_beyond_recent_context_limit(self):
         from types import SimpleNamespace
         from unittest.mock import AsyncMock
         from src.plugins.llm_chat.model_turn import run_stages
@@ -243,15 +204,20 @@ class WorkingContextTests(unittest.IsolatedAsyncioTestCase):
 
         question = "抽一个给他"
         correction = "我是说从角色池抽"
-        for rid, age, qq_message, original in (
-            ("recent", 1, 201, "另一个话题"),
-            ("quoted", 90, 101, question),
+        recent = [(f"recent-{index}", index + 2, 200 + index, "另一个话题", "group_7", 0, "sent")
+                  for index in range(51)]
+        for rid, age, qq_message, original, sid, generation, action_status in (
+            *recent,
+            ("quoted", 90, 101, question, "group_7", 0, "sent"),
+            ("other-group", 1, 101, "外群话题", "group_8", 0, "sent"),
+            ("other-generation", 1, 101, "已重置话题", "group_7", 1, "sent"),
+            ("unconfirmed", 1, 101, "未确认投递", "group_7", 0, "unknown"),
         ):
             state = {"requester_id": 202, "user_question": original, "actions": {
-                "reply": {"status": "sent", "text": "抽到了", "receipt": {"message_id": qq_message}},
+                "reply": {"status": action_status, "text": "抽到了", "receipt": {"message_id": qq_message}},
             }}
             await self.db.execute("INSERT INTO agent_runs VALUES(?,?,?,?,?,?)",
-                                  (rid, "group_7", 0, "complete", json.dumps(state), time.time() - age))
+                                  (rid, sid, generation, "complete", json.dumps(state), time.time() - age))
         await self.db.commit()
         run = self.runner()
         run.reply_policy = ReplyPolicy(addressing=QQAddressing(

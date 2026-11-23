@@ -15,11 +15,11 @@ require("nonebot_plugin_apscheduler")
 from nonebot_plugin_apscheduler import scheduler
 
 
-def quiet_enough(latest, human, previous_human, last_attempt, now):
+def quiet_enough(latest, human, previous_human, last_delivery, now):
     if not latest or not human or human == previous_human:
         return False
     return (now - datetime.fromisoformat(latest).timestamp() >= config.idle_meme_threshold
-            and now - last_attempt >= config.idle_meme_cooldown)
+            and now - last_delivery >= config.idle_meme_cooldown)
 
 
 async def activity(group_id):
@@ -30,6 +30,11 @@ async def activity(group_id):
         (f"group_{group_id}",),
     ) as cur:
         return await cur.fetchone()
+
+
+async def _record_idle_state(db, group_id, human, delivery_at):
+    await db.execute("INSERT OR REPLACE INTO idle_meme_state VALUES(?,?,?)", (group_id, human, delivery_at))
+    await db.commit()
 
 
 @serialized_turn(lambda bot, group_id: f"group_{group_id}", background=True)
@@ -47,26 +52,22 @@ async def share_idle_meme(bot, group_id):
     db = await meme_manager._get_db()
     await db.execute("CREATE TABLE IF NOT EXISTS idle_meme_state (group_id INTEGER PRIMARY KEY, human_at TEXT, attempted_at REAL)")
     async with db.execute("SELECT human_at,attempted_at FROM idle_meme_state WHERE group_id=?", (group_id,)) as cur:
-        previous = await cur.fetchone()
+        previous_human, last_delivery = await cur.fetchone() or (None, 0)
     latest, human = await activity(group_id)
-    if not quiet_enough(latest, human, previous[0] if previous else None, previous[1] if previous else 0, time.time()):
+    if not quiet_enough(latest, human, previous_human, last_delivery, time.time()):
         return False
-    # Claim the opportunity before planning, including when the planner stays quiet.
-    await db.execute("INSERT OR REPLACE INTO idle_meme_state VALUES(?,?,?)", (group_id, human, time.time()))
-    await db.commit()
     decision = await plan_chat_action(
         session_id=f"group_{group_id}", group_id=group_id, current_message="",
         mode="proactive", is_direct=False, trigger_kind="idle", bot_self_id=str(bot.self_id),
     )
     if not decision.meme_part:
+        if decision.action == "silent":
+            await _record_idle_state(db, group_id, human, last_delivery)
         return False
     picked = await meme_manager.pick_random(decision.meme_topic or None, meme_kind="joke")
     if not picked:
         return False
     meme_id, path, description = picked
-    # New human or scheduled bot messages arriving during selection supersede the idle trigger.
-    if tuple(await activity(group_id)) != (latest, human):
-        return False
     async with db.execute("SELECT topic FROM memes WHERE id=?", (meme_id,)) as cur:
         row = await cur.fetchone()
     if not row:
@@ -74,11 +75,20 @@ async def share_idle_meme(bot, group_id):
     token = _meme_context.set(None)
     try:
         set_meme_context(group_id, 0, bot)
+        # Keep a durable claim for unknown outcomes, including interruption during delivery.
+        await _record_idle_state(db, group_id, human, time.time())
+        if tuple(await activity(group_id)) != (latest, human):
+            await _record_idle_state(db, group_id, previous_human, last_delivery)
+            return False
         result = await send_picked_meme({"id": meme_id, "file_path": path, "topic": row[0],
                                       "description": description, "reason": decision.reason}, allow_reply=False)
         sent = get_last_sent_meme()
         if not sent:
-            logger.info(f"[idle_meme] group={group_id} send not confirmed: {result[:100]}")
+            status = getattr(result, "delivery_status", "unconfirmed")
+            if status == "failed":
+                # The existing five-minute scan can retry a confirmed failure.
+                await _record_idle_state(db, group_id, previous_human, last_delivery)
+            logger.info(f"[idle_meme] group={group_id} delivery={status}: {result[:100]}")
             return False
         await memory_manager.add_message(0, "assistant", format_sent_meme_for_memory(sent), group_id)
         proactive_manager.mark_just_spoke(group_id)

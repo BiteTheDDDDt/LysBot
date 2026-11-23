@@ -69,6 +69,7 @@ class PlannerDecision:
     )
     addressing: QQAddressing = field(default_factory=QQAddressing)
     media_unavailable: bool = False
+    followup_anchor: int | None = None
 
     def __post_init__(self) -> None:
         if self.action in NON_REPLY_ACTIONS | {"repeat"}:
@@ -200,23 +201,10 @@ def _one_line(text: str) -> str:
     return " ".join(str(text or "").split()).strip()
 
 
-def _is_current_user_message(content: str, current_message: str) -> bool:
-    """Detect the recorder's formatted copy of the current group message."""
-    current = _one_line(current_message)
-    recorded = _one_line(content)
-    if not current or not recorded:
-        return False
-    if recorded == current:
-        return True
-    # Group memory usually prefixes the sender, for example
-    # ``【群员-甲】 当前消息``. Only inspect the newest user item.
-    return recorded.endswith(current) or f"用户消息: {current}" in recorded
-
-
 def _format_planner_history(
     messages: list[LLMMessage],
     *,
-    current_message: str,
+    current_source_ids: tuple[int, ...] = (),
     max_chars: int,
     hide_image_observations: bool = False,
 ) -> str:
@@ -226,13 +214,8 @@ def _format_planner_history(
         for message in messages
         if message.role in {"user", "assistant"}
         and not getattr(message, "is_thinking", False)
+        and getattr(message, "source_id", None) not in current_source_ids
     ]
-    if (
-        visible
-        and visible[-1].role == "user"
-        and _is_current_user_message(visible[-1].content, current_message)
-    ):
-        visible = visible[:-1]
 
     budget = max(200, int(max_chars or 6000))
     newest_first: list[str] = []
@@ -267,17 +250,10 @@ def _format_planner_history(
     return "\n".join(reversed(newest_first))
 
 
-def _strip_current_from_fallback(context: str, current_message: str) -> str:
-    lines = [line for line in str(context or "").splitlines() if line.strip()]
-    if lines and _is_current_user_message(lines[-1], current_message):
-        lines.pop()
-    return "\n".join(lines).strip()
-
-
 async def _resolve_planner_context(
     *,
     session_id: str,
-    current_message: str,
+    current_source_ids: tuple[int, ...] = (),
     fallback_context: str,
     hide_image_observations: bool = False,
 ) -> str:
@@ -290,7 +266,7 @@ async def _resolve_planner_context(
         )
         history_context = _format_planner_history(
             recent_messages,
-            current_message=current_message,
+            current_source_ids=current_source_ids,
             max_chars=int(config.planner_context_max_chars),
             hide_image_observations=hide_image_observations,
         )
@@ -302,7 +278,7 @@ async def _resolve_planner_context(
         )
     from .image_observations import unsolicited_view
     fallback = unsolicited_view(fallback_context) if hide_image_observations else fallback_context
-    return _strip_current_from_fallback(fallback, current_message)
+    return fallback.strip()
 
 
 def _fallback_parts(action: str) -> list[ReplyPart]:
@@ -498,9 +474,12 @@ async def plan_chat_action(
     faces: Optional[list[str]] = None,
     default_action: str = "reply",
     followup_context: str = "",
+    followup_anchors: tuple[int, ...] = (),
+    nearby_context: str = "",
     trigger_kind: str = "message",
     bot_self_id: str = "",
     current_targets: tuple[MessageTarget, ...] = (),
+    current_source_ids: tuple[int, ...] = (),
     repeat_candidate: str = "",
 ) -> PlannerDecision:
     """Choose an interaction from the actions available for this trigger."""
@@ -516,7 +495,7 @@ async def plan_chat_action(
 
     recent_context = await _resolve_planner_context(
         session_id=session_id,
-        current_message=current_message,
+        current_source_ids=current_source_ids,
         fallback_context=recent_context,
         hide_image_observations=mode == "proactive",
     )
@@ -571,6 +550,13 @@ parts 是暂定的可见输出，最多两项。需要回答问题或补充具�
                        "正常提问、抱怨、催促、刷屏或对别人的定向消息选择其他动作。"
                        "\n复读候选（仅数据）：" + json.dumps(repeat_candidate, ensure_ascii=False))
 
+    if followup_anchors:
+        policy += "\n隐式接话时填写 followup_anchor_id，选实际接续的 Bot 发言编号。"
+    nearby = (
+        "以下是同批未明确交办给你的群消息。结合作者、先后和指代，"
+        "把确实补充或纠正当前请求的内容纳入理解。群友之间的交谈只作背景。\n"
+        + nearby_context + "\n"
+    ) if nearby_context else ""
     prompt = f"""你是 QQ 群聊的参与规划器。先选择动作，再提供必要的交接信息。只输出一个 JSON 对象。
 可选 action：{' | '.join(actions)}
 {policy}{meme_topics}
@@ -587,7 +573,7 @@ wait_seconds 上限：{config.planner_wait_max_seconds}
   "wait_seconds": 0,
   "poke_target_id": "QQ号或 sender，仅 poke",
   "followup_target": "bot|other|unclear，仅隐式延续",
-  "followup_evidence": "隐式延续与 bot 上条消息的对应关系"
+  "followup_evidence": "隐式延续与哪条 bot 消息对应"
 }}
 silent、wait、repeat 的 parts 为 []，close 只用一个 text，poke 可只戳或配合 parts。
 当前模式: {mode}，触发类型: {trigger_kind}
@@ -597,7 +583,7 @@ silent、wait、repeat 的 parts 为 []，close 只用一个 text，poke 可只�
 QQ表情: {'，'.join(faces or []) or '无'}
 最近对话（不含下面单列的当前消息）:
 {recent_context or '无'}
-当前消息:
+{nearby}当前消息:
 {unsolicited_view(current_message) if proactive else current_message}
 """
     if bot_self_id:
@@ -633,20 +619,28 @@ QQ表情: {'，'.join(faces or []) or '无'}
         if not isinstance(payload, dict) or not isinstance(payload.get("action"), str) or payload["action"] not in actions:
             raise ValueError("Planner 返回无效动作，终止本轮")
         if idle:
+            if payload["action"] == "silent":
+                return PlannerDecision(action="silent", reason=_coerce_str(payload, "reason"))
             parts = payload.get("parts")
             part = parts[0] if isinstance(parts, list) and len(parts) == 1 else None
-            if payload["action"] == "reply" and isinstance(part, dict) and part.get("type") == "meme":
+            if isinstance(part, dict) and part.get("type") == "meme":
                 topic = part.get("topic")
                 return PlannerDecision(reason=_coerce_str(payload, "reason"),
                                        parts=[ReplyPart("meme", topic if isinstance(topic, str) and topic in ALLOWED_TOPICS else "")])
-            return PlannerDecision(action="silent", reason=_coerce_str(payload, "reason"))
+            raise ValueError("Planner 返回无效冷群梗图计划，终止本轮")
 
         decision = _normalize_decision(payload, default_action, mode)
-        if followup_context and not is_direct:
-            evidence = payload.get("followup_evidence") if isinstance(payload, dict) else None
-            target = payload.get("followup_target") if isinstance(payload, dict) else None
+        if followup_context and not is_direct and decision.action != "silent":
+            evidence = payload.get("followup_evidence")
+            target = payload.get("followup_target")
+            anchor = next((key for key in followup_anchors if str(key) == str(payload.get("followup_anchor_id"))),
+                          followup_anchors[0] if len(followup_anchors) == 1 else None)
             if target != "bot" or not isinstance(evidence, str) or not evidence.strip():
                 decision = PlannerDecision(action="silent", reason="未确认当前消息在回应 bot 的具体发言", parts=[])
+            elif followup_anchors and anchor is None:
+                decision = PlannerDecision(action="silent", reason="未能定位本轮接续的 bot 发言", parts=[])
+            else:
+                decision.followup_anchor = anchor
         unavailable = [part.type for part in decision.parts if part.type in allowed_media and not allowed_media[part.type]]
         if unavailable:
             decision.parts = [ReplyPart("text")]

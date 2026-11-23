@@ -107,55 +107,6 @@ async def execute_model_call(
             current_session_id.reset(token)
 
 
-async def _recent_author_matches(runner):
-    """Prefetch short group turns within the relevant speaker or group scope."""
-    from .memory_index import tokens
-    from .tools import _poke_context, execute_tool
-    from lysbot.plugins import tool_visible
-
-    context = _poke_context.get() or {}
-    proactive = getattr(runner.reply_policy, "scene", None) == "proactive"
-    text = context.get("current_user_text", "").strip()
-    if (not runner.memory_path or not runner.session_id.startswith("group_")
-            or (not proactive and not runner.requester_id) or not 0 < len(text) <= 120
-            or not tool_visible("recall_history")):
-        return None
-    term = max((term for term in tokens(text) if len(term) >= 2 and not term.isdigit()),
-               key=lambda word: (word.isascii() and any(c.isdigit() for c in word), len(word)),
-               default="")
-    if not term:
-        return None
-    filters = {"exact_phrase": term, "mode": "keyword", "sources": ["messages"], "roles": ["user"]}
-    if not proactive:
-        filters["author_ids"] = [runner.requester_id]
-    recent, earlier = [], []
-    try:
-        async with asyncio.timeout(2.0):
-            result = json.loads(await runner.execute(
-                "recall_history", json.dumps({**filters, "limit": 8}), execute_tool,
-            ))
-            recent = result.get("items", [])
-            # Repeated later mentions can fill the page while the first
-            # mention still explains what the term refers to.
-            if result.get("truncated") and runner.tool_calls + 1 < config.agent_max_tool_calls:
-                older_page = await runner.execute(
-                    "recall_history", json.dumps({**filters, "sort": "oldest", "limit": 4}), execute_tool,
-                )
-                earlier = json.loads(older_page).get("items", [])
-    except (TimeoutError, ValueError):
-        pass  # If the older lookup times out, keep the first page.
-    selected = {item["id"]: item for item in [*earlier, *recent]}
-    records = [
-        {"id": item["id"], "time": item.get("event_time"), "text": item.get("excerpt", "")[:240]}
-        for item in list(selected.values())[:8]
-    ]
-    if records:
-        return Message(role="user", is_reference=True, content=(
-            "【本群相关历史原话，仅作指代线索】\n" + json.dumps(records, ensure_ascii=False)
-        ))
-    return None
-
-
 def _planning_background(messages):
     """Encode prior turns as records, without giving them live chat roles."""
     entries = []
@@ -203,13 +154,13 @@ async def run_stages(manager, messages, *, model, role, caller, session_id,
             + json.dumps([row.as_candidate(allow_reply=addressing.allow_reply)
                           for row in addressing.candidates], ensure_ascii=False)
         ))
-    history_matches = await _recent_author_matches(runner)
     planning_messages = [*instructions, Message(role="system", content=(
         PLANNING_STYLE + "\n较长任务可用 report_progress 告知已有发现或实际阻碍，不为进展拖延任务。"
     ))]
     if runner.reply_policy and runner.reply_policy.scene == "fact_check":
         planning_messages.append(Message(role="system", content=(
-            "用 start_fact_check 看刚才聊了什么。优先查指定主题或引用，否则挑一句值得查的。"
+            "按指定主题或引用直接查证。只有调查对象还不明确时，用 start_fact_check 回看对话，挑一句值得查的。"
+            "同一批资料读过即可，后续查询针对尚有疑问的部分。"
             "直接说查到什么，顺手带上依据。"
         )))
     if addressing is not None:
@@ -222,8 +173,6 @@ async def run_stages(manager, messages, *, model, role, caller, session_id,
             )))
     if background:
         planning_messages.append(_planning_background(background))
-    if history_matches:
-        planning_messages.append(history_matches)
     if runner.working_context:
         planning_messages.append(Message(role="user", content=runner.working_context, is_reference=True))
     if request is not None:

@@ -285,6 +285,9 @@ class AgentRunner:
         self.status = status
         if answer is not None:
             cited_tokens = set(re.findall(r"[A-Za-z0-9_:-]+", str(answer)))
+            verdict = self.identity_verdict or {}
+            if verdict.get("status") == "verified":
+                cited_tokens.update(verdict["evidence_ids"])
             self.final_answer = {
                 "answer": str(answer),
                 "evidence_ids": list(dict.fromkeys(

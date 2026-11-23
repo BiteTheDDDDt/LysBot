@@ -1,6 +1,10 @@
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 import nonebot
+from nonebot.adapters.onebot.v11.exception import ActionFailed
 nonebot.init()
 from src.plugins.llm_chat import tools
 from src.plugins.llm_chat.memes import meme_manager
@@ -39,3 +43,20 @@ class MemeCooldownTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(RuntimeError):
                 await tools.pick_meme('sad')
         self.assertIn('status=selection_error', tools.format_meme_selection_failure())
+
+    async def test_meme_delivery_distinguishes_rejection_from_unknown_receipt(self):
+        bot = SimpleNamespace(send_group_msg=AsyncMock(side_effect=[
+            ActionFailed(retcode=100, message='rejected'),
+            TimeoutError(),
+        ]))
+        tools.set_meme_context(77, 1, bot=bot, directed=True)
+        with TemporaryDirectory() as folder, patch.object(meme_manager, 'mark_sent') as mark:
+            image = Path(folder) / 'test.png'
+            image.write_bytes(b'example meme')
+            meme = {'id': 1, 'file_path': str(image), 'topic': 'funny'}
+            self.assertEqual((await tools.send_picked_meme(meme)).delivery_status, 'failed')
+            self.assertEqual((await tools.send_picked_meme(meme)).delivery_status, 'unconfirmed')
+            self.assertEqual((await tools.send_picked_meme(meme)).delivery_status, 'unconfirmed')
+        self.assertEqual(bot.send_group_msg.await_count, 2)
+        self.assertIsNone(tools.get_last_sent_meme())
+        mark.assert_not_called()

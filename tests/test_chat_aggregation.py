@@ -30,7 +30,7 @@ class AggregatedChatTests(unittest.IsolatedAsyncioTestCase):
     async def test_new_message_does_not_cancel_active_batch(self):
         started, release = asyncio.Event(), asyncio.Event()
         batches = []
-        async def process(bot, group_id, messages):
+        async def process(bot, group_id, messages, *, _collected_until=None):
             batches.append([message.message for message in messages])
             if len(batches) == 1:
                 started.set()

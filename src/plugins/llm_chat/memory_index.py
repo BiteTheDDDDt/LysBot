@@ -109,11 +109,16 @@ async def install_schema(db) -> None:
         for operation, row in (("INSERT", "NEW"), ("UPDATE", "NEW"), ("DELETE", "OLD")):
             source = f"({row}.id / {BLOCK_SIZE}) * {BLOCK_SIZE}" if kind == "messages" else f"{row}.id"
             generation = f"COALESCE((SELECT CAST(value AS INTEGER) FROM kv_meta WHERE key='memory_generation:'||{row}.session_id),0)"
+            mutation = f"""
+                INSERT INTO kv_meta(key,value) VALUES('memory_mutation:'||{row}.session_id,'1')
+                ON CONFLICT(key) DO UPDATE SET value=CAST(value AS INTEGER)+1;
+            """ if operation != "INSERT" else ""
             await db.execute(f"DROP TRIGGER IF EXISTS search_{kind}_{operation.lower()}")
             await db.execute(f"""CREATE TRIGGER search_{kind}_{operation.lower()}
                 AFTER {operation} ON {table} BEGIN
                 INSERT INTO kv_meta(key,value) VALUES('memory_revision:'||{row}.session_id,'1')
                 ON CONFLICT(key) DO UPDATE SET value=CAST(value AS INTEGER)+1;
+                {mutation}
                 INSERT INTO memory_index_jobs(session_id,kind,source_id,generation)
                 VALUES({row}.session_id,'{kind}',{source},{generation})
                 ON CONFLICT(session_id,kind,source_id,generation) DO UPDATE SET

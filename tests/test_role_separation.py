@@ -207,14 +207,13 @@ class RoleSeparationTests(unittest.IsolatedAsyncioTestCase):
                 self.assertNotIn("之前错误断言", rendered[-2].content)
                 self.assertEqual(str(result), draft)
 
-    async def test_previous_image_and_prefetch_are_background_to_current_request(self):
-        from src.plugins.llm_chat.agent_runner import current_run
+    async def test_planner_gets_current_request_without_automatically_searching_it(self):
+        from src.plugins.llm_chat.agent_runner import AgentRunner, current_run
 
         manager = models.ModelManager()
         old_image = "图片1（自动识别，仅作背景）: 一张道歉声明"
         request = models.Message("user", "你还记得之前约好由谁来负责吗", name="甲", sender_id=42,
                                  images=["current-image"])
-        matches = models.Message("user", "之前提到过这项分工", is_reference=True, sender_id=77)
         messages = [
             models.Message("assistant", "之前我猜是我"),
             models.Message("user", old_image, name="甲", sender_id=42),
@@ -227,12 +226,11 @@ class RoleSeparationTests(unittest.IsolatedAsyncioTestCase):
                 run = current_run.get()
                 self.assertEqual(run.user_question, request.content)
                 self.assertEqual(run.requester_id, 42)
-                background, recalled, current = received[-3:]
+                background, current = received[-2:]
                 self.assertTrue(background.is_reference)
                 history = [json.loads(line) for line in background.content.splitlines()[1:]]
                 self.assertIn({"role": "user", "name": "甲", "sender_id": 42, "content": old_image}, history)
-                self.assertEqual(recalled, matches)
-                self.assertNotIn(matches.content, background.content)
+                self.assertIn("附带的检索线索", background.content)
                 self.assertNotIn(request.content, background.content)
                 self.assertEqual(current.content, "【本轮请求】\n" + request.content)
                 self.assertEqual(current.sender_id, request.sender_id)
@@ -244,10 +242,11 @@ class RoleSeparationTests(unittest.IsolatedAsyncioTestCase):
             return models.ChatResponse("是乙")
 
         with (
-            patch("src.plugins.llm_chat.model_turn._recent_author_matches", AsyncMock(return_value=matches)),
+            patch.object(AgentRunner, "execute", AsyncMock()) as execute,
             patch.object(manager, "_chat_impl", side_effect=call),
         ):
             self.assertEqual(await manager.run_turn(messages), "是乙")
+            execute.assert_not_awaited()
 
     async def test_execution_plan_can_shorten_selected_detail_with_one_hint(self):
         from src.plugins.llm_chat.agent_runner import current_run

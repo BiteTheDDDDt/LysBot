@@ -1,7 +1,7 @@
 """主动发言模块 - 智能判断版"""
 import asyncio
 import time
-from typing import Dict, Set, List, Optional
+from typing import Dict, List, Optional
 from dataclasses import dataclass
 
 from nonebot import logger
@@ -16,12 +16,13 @@ from .context_builder import build_context_messages
 from .reply_policy import PROACTIVE_REPLY, constrain_plan, enforce_reply_budget, select_reply_policy
 from .planner import PlannerDecision, execute_planned_side_effect, plan_chat_action
 from .turns import is_meme_only, prepare_planned_meme, send_response_turn
-from .conversation import ensure_send_allowed, invalidate, serialized_turn
+from .conversation import ensure_send_allowed, serialized_turn
 
 # Internal participation tuning; not operator-facing settings.
-IDLE_THRESHOLD_SECONDS = 3600
 CHECK_WINDOW_SECONDS = 180
-PLANNER_COOLDOWN_SECONDS = 60
+PLANNER_COOLDOWN_SECONDS = 120
+
+
 @dataclass
 class RecentMessage:
     """最近消息记录"""
@@ -30,29 +31,22 @@ class RecentMessage:
     user_id: int
     message_id: int | None = None
     sender_name: str = ""
+    directed: bool = False
+    arrived_at: float | None = None
+    source_id: int | None = None
 
 
 class ProactiveManager:
     """主动发言管理器 - 智能判断版"""
 
     def __init__(self):
-        # 群消息计数器 {group_id: count}
-        self.msg_counters: Dict[int, int] = {}
-        # 冷却时间记录 {group_id: last_trigger_time}
+        # Confirmed unsolicited deliveries and planning attempts have separate pacing.
         self.cooldowns: Dict[int, float] = {}
-        # 主动发言规划冷却 {group_id: last_plan_time}，无论规划结果如何都冷却
         self.planner_cooldowns: Dict[int, float] = {}
-        # 正在处理中的群，防止重复触发
-        self.processing: Set[int] = set()
         # 刚刚主动发言的群 {group_id: timestamp}
         self._just_spoke: Dict[int, float] = {}
         # 最近消息缓存 {group_id: [RecentMessage]}，用于判断窗口
         self._recent_messages: Dict[int, List[RecentMessage]] = {}
-        # bot最后主动发言时间 {group_id: timestamp}
-        self._last_spoke: Dict[int, float] = {}
-        # 最近一次自我思考内容缓存 {group_id: content}
-        # 判断不触发时，推迟相同群下次空闲判断的冷却 {group_id: timestamp}
-        self._idle_retry_cooldowns: Dict[int, float] = {}
         # Planner 主动选择 wait 后的延迟重规划任务。
         self._wait_tasks: Dict[int, asyncio.Task] = {}
 
@@ -70,6 +64,7 @@ class ProactiveManager:
         message: str,
         request_text: str,
         user_id: int,
+        source_id: int | None,
         decision: PlannerDecision,
         wait_started_at: Optional[float],
         wait_replans: int,
@@ -105,6 +100,7 @@ class ProactiveManager:
                     message,
                     user_id,
                     request_text=request_text,
+                    source_id=source_id,
                     _deferred=True,
                     _wait_started_at=started_at,
                     _wait_replans=wait_replans + 1,
@@ -124,52 +120,38 @@ class ProactiveManager:
 
     def mark_just_spoke(self, group_id: int):
         """记录 Bot 最近一次发言时间。"""
-        now = time.time()
-        self._just_spoke[group_id] = now
-        self._last_spoke[group_id] = now
+        self._just_spoke[group_id] = time.monotonic()
 
     def just_spoke(self, group_id: int, within_seconds: float = 2.0) -> bool:
         """检查是否刚刚主动发言过"""
         if group_id not in self._just_spoke:
             return False
-        return time.time() - self._just_spoke[group_id] < within_seconds
+        return time.monotonic() - self._just_spoke[group_id] < within_seconds
 
     def is_on_cooldown(self, group_id: int) -> bool:
-        """检查是否在冷却中或消息过多"""
-        if self.msg_counters.get(group_id, 0) >= 100:
-            return False
+        """Throttle delivered proactive actions within each group."""
         if group_id not in self.cooldowns:
             return False
-        return time.time() - self.cooldowns[group_id] < config.proactive_cooldown
+        return time.monotonic() - self.cooldowns[group_id] < config.proactive_cooldown
 
 
     def set_cooldown(self, group_id: int):
         """设置冷却"""
-        self.cooldowns[group_id] = time.time()
+        self.cooldowns[group_id] = time.monotonic()
 
     def is_on_planner_cooldown(self, group_id: int) -> bool:
         """检查是否处于主动发言规划冷却期。"""
         if group_id not in self.planner_cooldowns:
             return False
-        return time.time() - self.planner_cooldowns[group_id] < PLANNER_COOLDOWN_SECONDS
+        return time.monotonic() - self.planner_cooldowns[group_id] < PLANNER_COOLDOWN_SECONDS
 
     def set_planner_cooldown(self, group_id: int):
         """设置主动发言规划冷却。"""
-        self.planner_cooldowns[group_id] = time.time()
-
-    def is_idle(self, group_id: int) -> bool:
-        """检查是否空闲（超过阈值时间没发言）"""
-        # 检查是否在空闲重试冷却中
-        if time.time() < self._idle_retry_cooldowns.get(group_id, 0):
-            return False
-
-        if group_id not in self._last_spoke:
-            # 从未发言过，视为空闲
-            return True
-        return time.time() - self._last_spoke[group_id] > IDLE_THRESHOLD_SECONDS
+        self.planner_cooldowns[group_id] = time.monotonic()
 
     def add_recent_message(self, group_id: int, content: str, user_id: int, message_id: int | None = None,
-                           *, sender_name: str = ""):
+                           *, sender_name: str = "", directed: bool = False, arrived_at: float | None = None,
+                           source_id: int | None = None):
 
         """添加最近消息到缓存"""
         from .image_observations import unsolicited_view
@@ -183,6 +165,9 @@ class ProactiveManager:
             user_id=user_id,
             message_id=message_id,
             sender_name=sender_name,
+            directed=directed,
+            arrived_at=arrived_at,
+            source_id=source_id,
         ))
 
         # 清理超过检查窗口的旧消息
@@ -197,6 +182,14 @@ class ProactiveManager:
         cutoff = time.time() - CHECK_WINDOW_SECONDS
         return [MessageTarget(m.message_id, m.user_id, m.content, (m.sender_name,))
                 for m in self._recent_messages.get(group_id, [])[-12:] if m.timestamp > cutoff]
+
+    def get_nearby_unaddressed(self, group_id: int, from_arrival: float, to_arrival: float) -> list[RecentMessage]:
+        return sorted(
+            (message for message in self._recent_messages.get(group_id, ())
+             if not message.directed and message.arrived_at is not None
+             and from_arrival <= message.arrived_at < to_arrival),
+            key=lambda message: message.arrived_at,
+        )
 
     def get_recent_messages_text(self, group_id: int, window_seconds: int = None) -> str:
         """获取最近检查窗口内的消息文本
@@ -222,17 +215,6 @@ class ProactiveManager:
         for m in recent:
             lines.append(f"用户{m.user_id}: {m.content}")
         return "\n".join(lines)
-
-    def increment_counter(self, group_id: int) -> int:
-        """增加消息计数，返回当前计数"""
-        if group_id not in self.msg_counters:
-            self.msg_counters[group_id] = 0
-        self.msg_counters[group_id] += 1
-        return self.msg_counters[group_id]
-
-    def reset_counter(self, group_id: int):
-        """重置计数器"""
-        self.msg_counters[group_id] = 0
 
     async def generate_proactive_response(
         self,
@@ -293,13 +275,14 @@ class ProactiveManager:
 
     async def try_proactive(self, bot: Bot, group_id: int, message: str, user_id: int = 0, *,
                             request_text: Optional[str] = None,
+                            source_id: int | None = None,
                             _deferred: bool = False, _wait_started_at=None, _wait_replans=0,
                             _recorded: bool = False, repeat_candidate: str = "") -> bool:
         if not _deferred and not _recorded:
-            self.add_recent_message(group_id, message, user_id)
-            self.increment_counter(group_id)
+            self.add_recent_message(group_id, message, user_id, source_id=source_id)
         return await self._try_proactive(bot, group_id, message, user_id,
             request_text=message if request_text is None else request_text,
+            source_id=source_id,
             _deferred=_deferred, _wait_started_at=_wait_started_at, _wait_replans=_wait_replans, repeat_candidate=repeat_candidate)
 
     @serialized_turn(lambda self, bot, group_id, *args, **kwargs: f"group_{group_id}", background=True)
@@ -311,6 +294,7 @@ class ProactiveManager:
         user_id: int = 0,
         *,
         request_text: str,
+        source_id: int | None = None,
         _deferred: bool = False,
         _wait_started_at: Optional[float] = None,
         _wait_replans: int = 0,
@@ -327,48 +311,18 @@ class ProactiveManager:
         if not config.enable_proactive:
             return False
 
-        # 正在处理中，跳过
-        if group_id in self.processing:
-            return False
-
-
-        # 检查是否在发言冷却中 (30分钟冷却)
         if self.is_on_cooldown(group_id):
             return False
-
-        count = self.msg_counters.get(group_id, 0)
-
-        # 消息数量或空闲时间决定何时请 planner 评估。
-        should_judge = False
-        trigger_reason = ""
-
-        if _deferred:
-            should_judge = True
-            trigger_reason = "Planner wait 延迟重规划"
-        elif repeat_candidate:
-            should_judge = True
-            trigger_reason = "复读候选"
-        elif count >= config.proactive_msg_threshold:
-            should_judge = True
-            trigger_reason = f"消息计数达到 {count} 条"
-        elif self.is_idle(group_id):
-            should_judge = True
-            trigger_reason = "群聊空闲检测"
-
-        if not should_judge:
+        if not _deferred and (group_id in self._wait_tasks or self.is_on_planner_cooldown(group_id)):
             return False
 
-        # 检查是否在判断冷却中 (防止在达到阈值后频繁请求LLM，默认60s)
-        if not _deferred and self.is_on_planner_cooldown(group_id):
-            return False
-
-        # 获取最近消息上下文
+        # Events accumulate in the same recent group context between planner calls.
         recent_context = self.get_recent_messages_text(group_id)
         if not recent_context:
             return False
 
-        # 设置为正在处理
-        self.processing.add(group_id)
+        self.set_planner_cooldown(group_id)
+        trigger_reason = "Planner wait 延迟重规划" if _deferred else ("复读候选" if repeat_candidate else "近期群聊")
         try:
             logger.info(f"[主动发言] 触发判断: {trigger_reason}, 群: {group_id}")
 
@@ -382,16 +336,16 @@ class ProactiveManager:
                 is_direct=False,
                 default_action="silent",
                 repeat_candidate=repeat_candidate,
+                current_source_ids=(source_id,) if source_id is not None else (),
             )
             if planner_decision.action == "wait":
-                self.reset_counter(group_id)
-                self.set_planner_cooldown(group_id)
                 self._schedule_wait_replan(
                     bot=bot,
                     group_id=group_id,
                     message=message,
                     request_text=request_text,
                     user_id=user_id,
+                    source_id=source_id,
                     decision=planner_decision,
                     wait_started_at=_wait_started_at,
                     wait_replans=_wait_replans,
@@ -400,10 +354,6 @@ class ProactiveManager:
 
             planner_decision = constrain_plan(planner_decision, PROACTIVE_REPLY)
             is_worth = planner_decision.should_continue
-
-            # 无论判断结果如何，都先重置计数器并设置判断冷却
-            self.reset_counter(group_id)
-            self.set_planner_cooldown(group_id)
 
             if planner_decision.action == "repeat" and repeat_candidate:
                 ensure_send_allowed(group_id)
@@ -418,7 +368,8 @@ class ProactiveManager:
                 # 有意义，触发发言
                 logger.info(f"[主动发言] planner action={planner_decision.action}，准备生成回复")
 
-                # 生成回复 (增加重试机制)
+                from . import followups
+                from .chat import _get_event_message_id
                 from .tools import (
                     clear_image_context,
                     clear_meme_context,
@@ -474,22 +425,14 @@ class ProactiveManager:
                             return poke_sent
                         response = ""
                     else:
-                        for retry in range(2):
-                            response = await self.generate_proactive_response(
-                                group_id,
-                                recent_context,
-                                trigger_message=message,
-                                planner_decision=planner_decision,
-                                planned_meme=planned_meme,
-                            )
-                            immediate_media_sent = (
-                                image_was_sent_this_round() or voice_was_sent_this_round()
-                            )
-                            if response or planned_meme or immediate_media_sent:
-                                break
-                            if not getattr(getattr(response, "agent_run", None), "should_reply", True):
-                                return poke_sent
-                            logger.warning(f"[主动发言] 第 {retry + 1} 次生成结果为空，尝试重试...")
+                        response = await self.generate_proactive_response(
+                            group_id,
+                            recent_context,
+                            trigger_message=message,
+                            planner_decision=planner_decision,
+                            planned_meme=planned_meme,
+                        )
+                        immediate_media_sent = image_was_sent_this_round() or voice_was_sent_this_round()
 
                     if immediate_media_sent:
                         media_type = (
@@ -504,11 +447,14 @@ class ProactiveManager:
                             try:
                                 ensure_send_allowed(group_id)
                                 from .agent_runner import deliver_reply as _deliver_agent_reply
-                                await _deliver_agent_reply(response, followup_text, lambda: bot.send_group_msg(
+                                receipt = await _deliver_agent_reply(response, followup_text, lambda: bot.send_group_msg(
                                     group_id=group_id,
                                     message=addressing.text(followup_text, first=False),
                                 ), bot=bot, group_id=group_id)
                                 sent_followup = followup_text
+                                message_id = _get_event_message_id(receipt)
+                                followups.answered(group_id, sent_followup, direct=True,
+                                                   message_ids=(message_id,) if message_id is not None else ())
                             except asyncio.CancelledError as exc:
                                 cancelled = exc
                             except Exception as exc:
@@ -551,10 +497,17 @@ class ProactiveManager:
                         # 清理回复内容
                         generated_response = response
                         response = clean_response(response or "")
+                        sent_ids = []
+
                         async def send_text_reply(text, payload) -> None:
                             ensure_send_allowed(group_id)
                             from .agent_runner import deliver_reply as _deliver_agent_reply
-                            await _deliver_agent_reply(generated_response, text, lambda: bot.send_group_msg(group_id=group_id, message=payload), bot=bot, group_id=group_id)
+                            receipt = await _deliver_agent_reply(generated_response, text, lambda: bot.send_group_msg(
+                                group_id=group_id, message=payload,
+                            ), bot=bot, group_id=group_id)
+                            message_id = _get_event_message_id(receipt)
+                            if message_id is not None:
+                                sent_ids.append(message_id)
 
                         sent_turn = await send_response_turn(
                             text=response,
@@ -566,10 +519,15 @@ class ProactiveManager:
                         if not sent_turn.sent_anything:
                             return poke_sent
 
-                        # 标记刚发言并设置 30 分钟冷却
-                        from . import followups
-                        followups.answered(group_id, sent_turn.text_for_memory, direct=True,
-                                           closed=planner_decision.action == "close")
+                        # Pace unsolicited actions after confirmed delivery.
+                        anchor_text = sent_turn.text_for_memory
+                        if sent_turn.sent_meme:
+                            message_id = _get_event_message_id(sent_turn.sent_meme)
+                            if message_id is not None:
+                                sent_ids.append(message_id)
+                            anchor_text = anchor_text or ("【我发了一张表情包】" + (sent_turn.sent_meme.get("description") or ""))
+                        followups.answered(group_id, anchor_text, direct=True,
+                                           closed=planner_decision.action == "close", message_ids=sent_ids)
                         self.mark_just_spoke(group_id)
                         self.set_cooldown(group_id)
 
@@ -588,10 +546,6 @@ class ProactiveManager:
                     clear_image_context()
             else:
                 logger.info(f"[主动发言] 判断无意义，暂不发言")
-                # 如果是由空闲检测触发的判断且被拒，推迟下一次空闲判断 5 分钟
-                if trigger_reason == "群聊空闲检测":
-                    self._idle_retry_cooldowns[group_id] = time.time() + 300
-                    logger.info(f"[主动发言] 群 {group_id} 空闲判断未通过，推迟 5 分钟后再次探测")
 
         except Exception as e:
             import traceback
@@ -606,9 +560,6 @@ class ProactiveManager:
                 f"  错误信息: {error_msg}\n"
                 f"  堆栈跟踪:\n{stack_trace}"
             )
-
-        finally:
-            self.processing.discard(group_id)
 
         return False
 

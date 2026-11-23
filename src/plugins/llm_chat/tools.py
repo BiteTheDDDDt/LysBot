@@ -19,7 +19,7 @@ from .capabilities import (
     READ_WEB_TOOL as READ_WEB_TOOL, QUERY_HISTORY_TOOL as QUERY_HISTORY_TOOL,
     MEMORY_TOOLS as MEMORY_TOOLS,
 )
-from .delivery import deliver_media
+from .delivery import deliver_media, deliver_once
 from .qq_addressing import QQAddressing
 from .image_references import ImageReference, image_reference_store
 
@@ -420,17 +420,17 @@ async def send_picked_meme(planned: Optional[Dict[str, Any]], allow_reply: bool 
     from .memes import meme_manager
 
     if not planned:
-        return "empty"
+        return ToolDeliveryResult("empty", "failed")
 
     ctx = _meme_context.get() or {}
     bot = ctx.get("bot")
     group_id = ctx.get("group_id")
 
     if not bot or not group_id:
-        return "send_meme 不可用：当前不是群聊上下文"
+        return ToolDeliveryResult("send_meme 不可用：当前不是群聊上下文", "failed")
 
     if ctx.get("sent_in_round"):
-        return "本轮回复已发过表情包，请用文字回应"
+        return ToolDeliveryResult("本轮回复已有表情包投递尝试，请用文字回应", "unconfirmed")
 
     meme_id = planned.get("id")
     file_path = planned.get("file_path")
@@ -443,25 +443,28 @@ async def send_picked_meme(planned: Optional[Dict[str, Any]], allow_reply: bool 
         p = Path(file_path)
         if not p.exists():
             logger.warning(f"[send_meme] 文件不存在 id={meme_id} path={file_path}")
-            return "empty"
+            return ToolDeliveryResult("empty", "failed")
         # 用 base64 内联发图，兼容跨机部署的 NapCat（file:// 只能同机）
         raw = await asyncio.to_thread(p.read_bytes)
         from nonebot.adapters.onebot.v11 import MessageSegment
         addressing = ctx["addressing"] if allow_reply else QQAddressing()
         ensure_send_allowed(group_id)
-        send_result = await bot.send_group_msg(
-            group_id=group_id,
-            message=addressing.prefix(include_reply=False, skip_mentions=skip_mentions) + MessageSegment.image(raw),
+        outgoing = addressing.prefix(include_reply=False, skip_mentions=skip_mentions) + MessageSegment.image(raw)
+        status, receipt = await deliver_once(
+            lambda: bot.send_group_msg(group_id=group_id, message=outgoing),
+            session_id=f"group_{group_id}",
         )
     except Exception as e:
         logger.error(f"[send_meme] 发送失败 id={meme_id}: {e}")
-        return f"send_meme 发送失败: {e}"
+        return ToolDeliveryResult(f"send_meme 发送失败: {e}", "failed")
 
-    meme_manager.mark_sent(group_id)
     ctx["sent_in_round"] = True
+    if status != "sent":
+        return ToolDeliveryResult("表情包投递结果未确认", status)
+    meme_manager.mark_sent(group_id)
     ctx["last_sent"] = {
         "id": meme_id,
-        "message_id": send_result.get("message_id") if isinstance(send_result, dict) else None,
+        "message_id": receipt["message_id"],
         "topic": topic,
         "description": description,
         "reason": reason,

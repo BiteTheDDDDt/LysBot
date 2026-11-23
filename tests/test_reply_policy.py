@@ -1,6 +1,7 @@
 import asyncio
 import hashlib
 import unittest
+from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -167,6 +168,16 @@ class ReplyContextTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([call.args for call in send.await_args_list],
                          [("这也太快了", "这也太快了"), ("刚打开就卖完了", "刚打开就卖完了")])
         self.assertEqual(result.text_for_memory, "这也太快了\n刚打开就卖完了")
+
+    async def test_group_chat_honors_final_one_message_delivery(self):
+        send = AsyncMock()
+        text = "这也太快了。刚打开就卖完了"
+        await send_response_turn(
+            text=text, decision=PlannerDecision(parts=[ReplyPart("text")]),
+            planned_meme=None, reply_policy=replace(SHORT_REPLY, text_parts=1),
+            send_text=send, delay_range=(0, 0), group_chat=True,
+        )
+        send.assert_awaited_once_with(text, text)
 
     async def test_private_short_reply_does_not_split_on_newline(self):
         send = AsyncMock()

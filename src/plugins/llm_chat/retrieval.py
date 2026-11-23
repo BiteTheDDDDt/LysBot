@@ -132,6 +132,13 @@ def cursor_offset(cursor, key):
     return data["offset"]
 
 
+def _source_revisions(db, sid):
+    revision_key = "memory_revision:" + sid
+    mutation_key = "memory_mutation:" + sid
+    rows = dict(db.execute("SELECT key,value FROM kv_meta WHERE key IN (?,?)", (revision_key, mutation_key)))
+    return int(rows.get(revision_key, 0)), int(rows.get(mutation_key, 0))
+
+
 class HistorySearch:
     def __init__(self, path):
         self.path = path
@@ -219,9 +226,7 @@ class HistorySearch:
         with self._connect() as db:
             db.execute("BEGIN")
             gen = generation(db, sid)
-            revision = db.execute(
-                "SELECT value FROM kv_meta WHERE key=?", ("memory_revision:" + sid,)
-            ).fetchone()
+            revision, mutation = _source_revisions(db, sid)
             active = db.execute("SELECT value FROM kv_meta WHERE key='memory_active_embedding'").fetchone()
             version = active[0] if active else ""
             settings = db.execute("SELECT value FROM kv_meta WHERE key=?", ("memory_embedding:" + version,)).fetchone()
@@ -249,7 +254,8 @@ class HistorySearch:
                 version,
                 json.loads(settings[0]) if settings else None,
                 {
-                    "source_revision": int(revision[0]) if revision else 0,
+                    "source_revision": revision,
+                    "source_mutation_revision": mutation,
                     "projection_jobs_pending": jobs[0],
                     "earliest_pending_source": jobs[1],
                     "embedding_version": version,
@@ -371,15 +377,18 @@ class HistorySearch:
             # a backend recovers. Never apply an old offset to a different pool.
             if cursor and cursor_state.get("candidates") != candidate_key:
                 raise ValueError("cursor_expired_retry_search")
-            # Source changes during embedding/retrieval invalidate the snapshot.
+            # Appends do not invalidate the evidence already found on a first page.
+            # Edits, deletions and pagination still require a stable snapshot.
             with self._connect() as db:
+                db.execute("BEGIN")
                 if generation(db, sid) != gen:
                     return failure("scope_changed", retryable=True)
-                revision = db.execute(
-                    "SELECT value FROM kv_meta WHERE key=?", ("memory_revision:" + sid,)
-                ).fetchone()
-                if (int(revision[0]) if revision else 0) != coverage["source_revision"]:
+                revision, mutation = _source_revisions(db, sid)
+                appended = revision != coverage["source_revision"]
+                if mutation != coverage["source_mutation_revision"] or (cursor and appended):
                     return failure("scope_changed_retry_search", retryable=True)
+            if appended and truncated:
+                warnings.append("sources_appended_restart_for_more_results")
             if coverage["projection_jobs_pending"]:
                 warnings.append("index_incomplete_original_search_included")
             effective = (
@@ -406,7 +415,7 @@ class HistorySearch:
                 next_cursor=cursor_encode(key, offset + limit, state={
                     "times": [since, until], "snapshot": snapshot, "candidates": candidate_key,
                 })
-                if truncated and len(items) == limit and offset + limit < 300
+                if not appended and truncated and len(items) == limit and offset + limit < 300
                 else None,
                 hits=items,
                 count=len(items),

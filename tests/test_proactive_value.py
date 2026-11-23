@@ -32,6 +32,24 @@ class ProactiveValueTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.plan({"action": "reply"}, mode="passive")).action, "reply")
         self.assertEqual((await self.plan({"action": "wait"})).action, "wait")
 
+    async def test_proactive_plans_on_recent_activity_without_message_counts(self):
+        manager = proactive.ProactiveManager()
+        bot = SimpleNamespace(self_id=999)
+        now = 1000
+        clock = SimpleNamespace(time=lambda: now, monotonic=lambda: now)
+        plan = AsyncMock(return_value=planner.PlannerDecision(action="silent"))
+        with patch.object(proactive, "time", clock), patch.object(proactive, "plan_chat_action", plan):
+            self.assertFalse(await manager.try_proactive(bot, 7, "群友第一句", 42, source_id=13))
+            now += 60
+            self.assertFalse(await manager.try_proactive(bot, 7, "中间的补充", 43, source_id=14))
+            plan.assert_awaited_once()
+            now += 60
+            self.assertFalse(await manager.try_proactive(bot, 7, "最新一句", 42, source_id=15))
+            self.assertEqual(plan.await_count, 2)
+            self.assertIn("中间的补充", plan.await_args.kwargs["recent_context"])
+            self.assertEqual(plan.await_args.kwargs["current_source_ids"], (15,))
+            self.assertFalse(manager.is_on_cooldown(7))
+
     async def test_failed_proactive_planner_aborts_without_default_decision(self):
         with (
             patch.object(planner, "_resolve_planner_context", AsyncMock(return_value="")),
@@ -65,8 +83,10 @@ class ProactiveValueTests(unittest.IsolatedAsyncioTestCase):
     async def test_idle_plan_is_one_standalone_joke_or_silence(self):
         decision = await self.plan({"action": "reply", "parts": [{"type": "meme"}]}, trigger_kind="idle")
         self.assertEqual((decision.action, decision.meme_part.type, decision.meme_topic), ("reply", "meme", ""))
-        decision = await self.plan({"action": "reply", "parts": [{"type": "text"}]}, trigger_kind="idle")
+        decision = await self.plan({"action": "silent"}, trigger_kind="idle")
         self.assertEqual(decision.action, "silent")
+        with self.assertRaises(ValueError):
+            await self.plan({"action": "reply", "parts": [{"type": "text"}]}, trigger_kind="idle")
 
     async def test_generation_receives_same_policy(self):
         with (

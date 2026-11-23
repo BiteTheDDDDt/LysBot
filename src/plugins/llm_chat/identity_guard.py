@@ -111,7 +111,9 @@ async def verify_identity(run, draft, backend, client, kwargs):
         "核对称呼指向的@账号、被回复者或本人对被称呼的回应，排除否定、转述、玩笑与歧义。"
         '证据足够时只输出JSON：{"person_id":"账号","evidence_ids":["原消息ID"],'
         '"relation":"direct_address或reply_address或self_identification","show_account":false}。'
-        '用户要核对具体账号时 show_account=true。证据不足或冲突无法消解输出{"person_id":null,"evidence_ids":[]}。不要生成用户可见答案。'
+        '用户要核对具体账号时 show_account=true。用户问依据或要原话时，另填 evidence_quote：'
+        '{"id":"已选的原消息ID","text":"原文中直接体现对应关系的短句"}。'
+        '证据不足或冲突无法消解输出{"person_id":null,"evidence_ids":[]}。不要生成用户可见答案。'
     )
     request = {k: v for k, v in kwargs.items() if k not in {"tools", "tool_choice", "messages", "response_format"}}
     request["max_tokens"] = 500
@@ -163,4 +165,10 @@ async def verify_identity(run, draft, backend, client, kwargs):
     answer = (
         f"是 QQ {uid}。" if verdict.get("show_account") is True else f"是{accounts[uid]}。"
     )
+    quote = verdict.get("evidence_quote")
+    if isinstance(quote, dict) and quote.get("id") in cited:
+        original = run.evidence[quote["id"]]["content"]
+        excerpt = quote.get("text")
+        if isinstance(excerpt, str) and 0 < len(excerpt.strip()) <= 240 and excerpt in original:
+            answer += f"依据是群里这句原话：「{excerpt.strip()}」"
     return answer, usage

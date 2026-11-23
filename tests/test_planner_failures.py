@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, patch
 import nonebot
 nonebot.init()
 
-from src.plugins.llm_chat import chat, planner
+from src.plugins.llm_chat import chat, followups, planner
 
 
 class PlannerFailureTests(unittest.IsolatedAsyncioTestCase):
@@ -25,13 +25,14 @@ class PlannerFailureTests(unittest.IsolatedAsyncioTestCase):
                     await planner.plan_chat_action(session_id='group_77', group_id=77, current_message='生成图片')
 
     async def test_merged_planner_failure_notifies_only_an_explicit_request(self):
+        followups.answered(77, '要把这张图做成什么样', direct=True)
+        self.addCleanup(followups.windows.pop, 77, None)
         bot = SimpleNamespace(send=AsyncMock(), send_group_msg=AsyncMock())
-        event = SimpleNamespace(get_plaintext=lambda: '根据群友印象生成一张自拍九宫格照片')
+        event = SimpleNamespace(group_id=77, get_plaintext=lambda: '根据群友印象生成一张自拍九宫格照片')
         pending = chat.PendingMessage(user_id=123, sender_name='甲', message=event.get_plaintext(), event=event)
         for direct, error in [(True, asyncio.TimeoutError), (False, ValueError)]:
             bot.send.reset_mock()
             with patch.object(chat, '_group_message_direction', return_value=(direct, False)), \
-                 patch.object(chat, '_eligible_event_followup', return_value=True), \
                  patch.object(chat, 'plan_chat_action', AsyncMock(side_effect=error)), \
                  patch.object(chat.model_manager, 'run_turn', AsyncMock()) as content:
                 await chat.handle_merged_chat(bot, 77, [pending])

@@ -84,8 +84,7 @@ class Config(BaseModel):
     enable_targeted_reply: bool = True  # 允许 planner 选择 QQ 引用回复
     enable_group_repeat: bool = True  # 是否启用群复读
     enable_proactive: bool = True  # 是否启用主动发言
-    proactive_msg_threshold: int = 50
-    proactive_cooldown: int = 3600
+    proactive_cooldown: int = 300  # Confirmed unsolicited actions, in seconds.
     idle_meme_enabled: bool = True
 
     @field_validator("briefing_time", "news_broadcast_time")

@@ -39,8 +39,7 @@ class IncomingPipelineTests(unittest.IsolatedAsyncioTestCase):
         self.patches.enter_context(patch.object(conversation, '_closing', False))
         for setting in ('enable_summary', 'enable_important_info', 'enable_group_repeat'):
             self.patches.enter_context(patch.object(chat.config, setting, False))
-        for method in ('add_recent_message', 'increment_counter'):
-            self.patches.enter_context(patch.object(chat.proactive_manager, method))
+        self.patches.enter_context(patch.object(chat.proactive_manager, 'add_recent_message'))
         self.patches.enter_context(patch.object(chat.proactive_manager, 'try_proactive', AsyncMock(return_value=False)))
         self.patches.enter_context(patch.object(chat, 'download_images_as_base64', AsyncMock(side_effect=lambda urls: [(url, 'c3ludGhldGljLWltYWdl') for url in urls])))
         self.patches.enter_context(patch.object(chat.model_manager, 'analyze_image_for_meme', AsyncMock(return_value={'description': '一只猫', 'is_meme': False})))
@@ -97,22 +96,32 @@ class IncomingPipelineTests(unittest.IsolatedAsyncioTestCase):
         self.bot.send.assert_awaited_once_with(direct, chat.IMAGE_FAILURE)
         plan.assert_not_awaited()
 
-    async def test_direct_prompt_keeps_later_budget_condition_in_history(self):
+    async def test_direct_prompt_keeps_a_plain_budget_condition_without_a_followup_window(self):
         request = self.event(Message("查预算"))
         condition = self.event(Message("查预算先按300元算"), message_id=2, direct=False)
+        other = self.event(MessageSegment.at(777) + Message("按500元算"), message_id=3, direct=False)
+        manager = chat.proactive_manager
         with (
             patch.object(chat.config, "aggregation_window", 0),
-            patch.object(chat, "plan_chat_action", AsyncMock(return_value=chat.PlannerDecision())),
+            patch.object(chat, "plan_chat_action", AsyncMock(return_value=chat.PlannerDecision())) as plan,
+            patch.object(manager, "_recent_messages", {}),
+            patch.object(manager, "add_recent_message", lambda *args, **kwargs: type(manager).add_recent_message(manager, *args, **kwargs)),
             patch.object(chat, "build_context_messages", AsyncMock(return_value=[])) as context,
             patch.object(chat.model_manager, "run_turn", AsyncMock(return_value="按300元算")),
         ):
             await chat.record_group_message(self.bot, request)
             await chat.record_group_message(self.bot, condition)
+            await chat.record_group_message(self.bot, other)
+            self.assertFalse(await chat.should_respond(condition))
             await chat.handle_chat(self.bot, request)
             await chat.aggregation_buffers[self.group_id].task
         prompt = context.await_args.kwargs
         self.assertIn("查预算", prompt["user_content"])
-        self.assertEqual([m.source_id for m in prompt["history"]], [condition._llm_memory_source_id])
+        self.assertIn("按300元算", plan.await_args.kwargs["nearby_context"])
+        self.assertNotIn("按500元算", plan.await_args.kwargs["nearby_context"])
+        self.assertIn("按300元算", prompt["recent_context"])
+        self.assertEqual([m.source_id for m in prompt["history"]],
+                         [condition._llm_memory_source_id, other._llm_memory_source_id])
 
     async def test_group_partial_download_preserves_position_in_history_and_reply(self):
         second = "https://example.com/second.png"
@@ -303,7 +312,6 @@ class IncomingPipelineTests(unittest.IsolatedAsyncioTestCase):
         enrich.assert_awaited_once()
         self.assertIn("转发中的实际内容", enrich.await_args.args[2])
         chat.proactive_manager.add_recent_message.assert_not_called()
-        chat.proactive_manager.increment_counter.assert_not_called()
         chat.proactive_manager.try_proactive.assert_not_awaited()
         rows = await self.rows()
         self.assertIn("等待展开", rows[0][1])
@@ -312,7 +320,7 @@ class IncomingPipelineTests(unittest.IsolatedAsyncioTestCase):
     async def test_existing_aggregation_worker_accepts_a_new_generation_after_reset(self):
         accepted = []
 
-        async def merged(_bot, _group_id, batch):
+        async def merged(_bot, _group_id, batch, *, _collected_until=None):
             conversation.ensure_current_session()
             accepted.extend(item.message for item in batch)
             await self.manager.add_message(0, "assistant", "已处理新批次", self.group_id)
