@@ -23,6 +23,11 @@ class ReplyPolicy:
     tiny: bool = False
     text_parts: int | None = None
     addressing: QQAddressing | None = field(default=None, compare=False)
+    implicit_followup: bool = False
+
+    @property
+    def optional_participation(self) -> bool:
+        return self.scene == "proactive" or self.implicit_followup
 
     @property
     def max_chars(self) -> int:
@@ -94,7 +99,9 @@ def _select_reply_policy(
 
 def select_reply_policy(current_messages, *, scene="chat", decision=None):
     policy = _select_reply_policy(current_messages, scene=scene, decision=decision)
-    return replace(policy, addressing=decision.addressing) if decision else policy
+    if decision:
+        return replace(policy, addressing=decision.addressing, implicit_followup=decision.followup_anchor is not None)
+    return policy
 
 
 def constrain_plan(

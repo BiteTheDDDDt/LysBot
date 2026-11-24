@@ -1,4 +1,5 @@
 import asyncio
+import json
 import tempfile
 import unittest
 from contextlib import ExitStack
@@ -86,6 +87,35 @@ class IncomingPipelineTests(unittest.IsolatedAsyncioTestCase):
         ) as cursor:
             return await cursor.fetchall()
 
+    async def test_proactive_planner_sees_who_was_asked_to_pass_on_a_task(self):
+        from src.plugins.llm_chat import planner, proactive
+
+        event = self.event("帮忙问问她明天来不来", message_id=82, direct=False)
+        event.original_message = MessageSegment.reply(81) + MessageSegment.at(456) + event.message
+        self.bot.self_id = "999"
+        self.bot.call_api.return_value = {
+            "sender": {"user_id": 456, "nickname": "乙"},
+            "message": [{"type": "text", "data": {"text": "我明天去找她"}}],
+        }
+        manager = proactive.ProactiveManager()
+        with (
+            patch.object(chat, "proactive_manager", manager),
+            patch.object(proactive, "proactive_manager", manager),
+            patch.object(chat.config, "enable_proactive", True),
+            patch.object(planner, "_resolve_planner_context", AsyncMock(return_value="")),
+            patch.object(planner.model_manager, "chat", AsyncMock(return_value='{"action":"silent"}')) as plan,
+        ):
+            await chat.record_group_message(self.bot, event)
+        prompt = plan.await_args.args[0][0].content
+        candidates = json.loads(prompt.splitlines()[-1])
+        current = next(row for row in candidates if row["origin"] == "current")
+        self.assertEqual((current["message_id"], current["user_id"]), (82, 123))
+        self.assertEqual((current["quoted_message_id"], current["quoted_user_id"]), (81, 456))
+        self.assertEqual(current["mentioned_user_ids"], [456])
+        quoted = next(row for row in candidates if row["origin"] == "quoted")
+        self.assertEqual((quoted["message_id"], quoted["text"]), (81, "我明天去找她"))
+        self.bot.call_api.assert_awaited_once_with("get_msg", message_id=81)
+
     async def test_unreadable_group_image_only_notifies_a_direct_request(self):
         with patch.object(chat, "download_images_as_base64", AsyncMock(return_value=[])), \
              patch.object(chat, "plan_chat_action", AsyncMock()) as plan:
@@ -95,6 +125,48 @@ class IncomingPipelineTests(unittest.IsolatedAsyncioTestCase):
             await chat.handle_chat(self.bot, ordinary)
         self.bot.send.assert_awaited_once_with(direct, chat.IMAGE_FAILURE)
         plan.assert_not_awaited()
+        self.assertEqual(followups.active(self.group_id).requested_image_from, direct.user_id)
+
+    async def test_requested_image_and_own_quoted_image_reach_the_same_followup(self):
+        followups.answered(self.group_id, "刚才那张图能再发一次吗", direct=True,
+                           requested_image_from=123, message_ids=(55,))
+        anchor = followups.quoted_anchor(self.group_id, 55)
+        followups.answered(self.group_id, "另一件事", direct=True)
+        image = self.event(MessageSegment.image(self.image_url), message_id=2, direct=False)
+        quote = self.event(MessageSegment.reply(2) + Message("这张"), message_id=3, direct=False)
+        quote.reply = SimpleNamespace(message_id=2, sender=image.sender, message=image.message)
+        with (
+            patch.object(chat.config, "aggregation_window", 0.1),
+            patch.object(chat, "plan_chat_action", AsyncMock(return_value=chat.PlannerDecision(followup_anchor=anchor))) as plan,
+            patch.object(chat, "build_context_messages", AsyncMock(return_value=[])) as context,
+            patch.object(chat.model_manager, "run_turn", AsyncMock(return_value="图里的是操纵杆")),
+        ):
+            for event in (image, quote):
+                await chat.record_group_message(self.bot, event)
+                self.assertTrue(await chat.should_respond(event))
+                await chat.handle_chat(self.bot, event)
+            await chat.aggregation_buffers[self.group_id].task
+        plan.assert_awaited_once()
+        self.assertEqual(plan.await_args.kwargs["followup_anchors"], (anchor,))
+        self.assertFalse(plan.await_args.kwargs["is_direct"])
+        self.assertIn("补充图片", plan.await_args.kwargs["current_message"])
+        self.assertIn("这张", plan.await_args.kwargs["current_message"])
+        self.assertIn("再发一次", context.await_args.kwargs["recent_context"])
+        self.assertIn("一只猫", context.await_args.kwargs["user_content"])
+        self.assertTrue(context.await_args.kwargs["user_images"])
+        self.bot.send.assert_awaited_once()
+        self.assertFalse(await chat.should_respond(image))  # The request was answered.
+
+    async def test_unrelated_pictures_are_not_offered_as_requested_input(self):
+        followups.answered(self.group_id, "发张图看看", direct=True, requested_image_from=123)
+        other_author = self.event(MessageSegment.image(self.image_url), direct=False)
+        other_author.user_id = 321
+        to_another_member = self.event(MessageSegment.image(self.image_url) + MessageSegment.at(456),
+                                       message_id=2, direct=False)
+        for event in (other_author, to_another_member):
+            await chat.record_group_message(self.bot, event)
+            self.assertFalse(await chat.should_respond(event))
+        await self.finish_background()
 
     async def test_direct_prompt_keeps_a_plain_budget_condition_without_a_followup_window(self):
         request = self.event(Message("查预算"))
@@ -157,6 +229,21 @@ class IncomingPipelineTests(unittest.IsolatedAsyncioTestCase):
 
     async def finish_background(self):
         await asyncio.wait_for(asyncio.gather(*tuple(chat._incoming_tasks)), timeout=5)
+
+    async def test_captioned_picture_reaches_planner_with_observation_as_background(self):
+        picture = MessageSegment.image(self.image_url)
+        await chat.record_group_message(self.bot, self.event(picture, direct=False))
+        await self.finish_background()
+        chat.proactive_manager.try_proactive.assert_not_awaited()
+        await chat.record_group_message(self.bot, self.event(
+            Message("它在干嘛") + picture, message_id=2, direct=False,
+        ))
+        await self.finish_background()
+        trigger = chat.proactive_manager.try_proactive.await_args.args[2]
+        self.assertIn("自动识别背景", trigger)
+        self.assertIn("一只猫", trigger)
+        self.assertIn("它在干嘛", trigger)
+        self.assertNotIn("一只猫", chat.proactive_manager.add_recent_message.call_args.args[1])
 
     async def test_raw_message_is_saved_before_forward_expansion_and_keeps_arrival_order(self):
         entered, release = asyncio.Event(), asyncio.Event()

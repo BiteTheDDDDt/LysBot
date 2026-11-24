@@ -11,6 +11,7 @@ from .config import config
 from .qq_addressing import ADDRESSING_GUIDE, MessageTarget, QQAddressing, select_addressing
 from .memory import memory_manager
 from .memes import ALLOWED_TOPICS
+from .model_identity import format_model_label
 from .models import Message as LLMMessage, model_manager
 from .reply_policy import REPLY_MODE_GUIDANCE
 
@@ -232,7 +233,9 @@ def _format_planner_history(
         if len(content) > 1200:
             content = content[:1200] + "…"
         if message.role == "assistant":
-            line = f"Bot: {content}"
+            model = format_model_label(message.model_spec)
+            speaker = f"Bot（{model}）" if model else "Bot"
+            line = f"{speaker}: {content}"
         elif getattr(message, "name", None) and not content.startswith("【群员-"):
             line = f"{message.name}: {content}"
         else:
@@ -591,7 +594,9 @@ QQ表情: {'，'.join(faces or []) or '无'}
     candidates = []
     if group_id and not idle:
         from .proactive import proactive_manager
-        candidates = [*proactive_manager.get_recent_targets(group_id), *current_targets]
+        # A message in this batch may also be quoted later in the same batch.
+        candidates = [*proactive_manager.get_recent_targets(group_id),
+                      *sorted(current_targets, key=lambda row: row.origin == "current")]
         candidates = list({(row.message_id, row.user_id): row for row in candidates}.values())
     if candidates:
         prompt += (

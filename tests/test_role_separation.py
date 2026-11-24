@@ -96,24 +96,27 @@ class RoleSeparationTests(unittest.IsolatedAsyncioTestCase):
             error.body = {"error": {"code": code, "reset_seconds": delay}}
             self.assertEqual(models._quota_reset_delay(error), 0)
 
-    async def test_proactive_can_skip_participation_but_direct_question_still_renders(self):
+    async def test_execution_can_decline_optional_participation_but_direct_question_still_renders(self):
         from src.plugins.llm_chat.agent_runner import current_run
         from src.plugins.llm_chat.conversation_style import unpack_plan
-        from src.plugins.llm_chat.reply_policy import PROACTIVE_REPLY, SHORT_REPLY
+        from src.plugins.llm_chat.planner import PlannerDecision
+        from src.plugins.llm_chat.reply_policy import PROACTIVE_REPLY, SHORT_REPLY, select_reply_policy
+        followup = select_reply_policy([], scene="multiuser", decision=PlannerDecision(followup_anchor=42))
         parsed = unpack_plan(json.dumps({"response_mode": "factual", "verify_group_identity": False,
-                                         "content": "缺少出处，无法提供有用解释", "should_reply": False}))
+                                         "content": "这个条件刚解释过了", "should_reply": False}))
         self.assertFalse(parsed["should_reply"])
-        for policy in (PROACTIVE_REPLY, SHORT_REPLY):
+        for policy, optional in ((PROACTIVE_REPLY, True), (followup, True), (SHORT_REPLY, False)):
             manager = models.ModelManager()
             async def call(messages, **kwargs):
                 if kwargs["role"] == "planner":
+                    self.assertTrue(messages[-1].content.startswith("【本轮群聊消息】" if optional else "【本轮请求】"))
                     current_run.get().should_reply = parsed["should_reply"]
                     return models.ChatResponse(parsed["content"])
-                return models.ChatResponse("具体指哪个角色？")
+                return models.ChatResponse("对，还是那个条件")
             with patch.object(manager, "_chat_impl", side_effect=call) as calls:
-                result = await manager.run_turn([models.Message("user", "这是谁？")], reply_policy=policy)
-            self.assertEqual(str(result), "" if policy == PROACTIVE_REPLY else "具体指哪个角色？")
-            self.assertEqual(calls.call_count, 1 if policy == PROACTIVE_REPLY else 2)
+                result = await manager.run_turn([models.Message("user", "还是那个条件吧")], reply_policy=policy)
+            self.assertEqual(str(result), "" if optional else "对，还是那个条件")
+            self.assertEqual(calls.call_count, 1 if optional else 2)
 
     async def test_proactive_text_requires_execution_planner_to_explicitly_choose_reply(self):
         from src.plugins.llm_chat.reply_policy import PROACTIVE_REPLY

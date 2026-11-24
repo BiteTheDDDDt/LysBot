@@ -15,6 +15,7 @@ from .repeat import repeat_manager
 from .context_builder import build_context_messages
 from .reply_policy import PROACTIVE_REPLY, constrain_plan, enforce_reply_budget, select_reply_policy
 from .planner import PlannerDecision, execute_planned_side_effect, plan_chat_action
+from .qq_addressing import MessageTarget
 from .turns import is_meme_only, prepare_planned_meme, send_response_turn
 from .conversation import ensure_send_allowed, serialized_turn
 
@@ -65,6 +66,7 @@ class ProactiveManager:
         request_text: str,
         user_id: int,
         source_id: int | None,
+        current_targets: tuple[MessageTarget, ...],
         decision: PlannerDecision,
         wait_started_at: Optional[float],
         wait_replans: int,
@@ -101,6 +103,7 @@ class ProactiveManager:
                     user_id,
                     request_text=request_text,
                     source_id=source_id,
+                    current_targets=current_targets,
                     _deferred=True,
                     _wait_started_at=started_at,
                     _wait_replans=wait_replans + 1,
@@ -178,7 +181,6 @@ class ProactiveManager:
         ][-100:]
 
     def get_recent_targets(self, group_id: int):
-        from .qq_addressing import MessageTarget
         cutoff = time.time() - CHECK_WINDOW_SECONDS
         return [MessageTarget(m.message_id, m.user_id, m.content, (m.sender_name,))
                 for m in self._recent_messages.get(group_id, [])[-12:] if m.timestamp > cutoff]
@@ -276,13 +278,14 @@ class ProactiveManager:
     async def try_proactive(self, bot: Bot, group_id: int, message: str, user_id: int = 0, *,
                             request_text: Optional[str] = None,
                             source_id: int | None = None,
+                            current_targets: tuple[MessageTarget, ...] = (),
                             _deferred: bool = False, _wait_started_at=None, _wait_replans=0,
                             _recorded: bool = False, repeat_candidate: str = "") -> bool:
         if not _deferred and not _recorded:
             self.add_recent_message(group_id, message, user_id, source_id=source_id)
         return await self._try_proactive(bot, group_id, message, user_id,
             request_text=message if request_text is None else request_text,
-            source_id=source_id,
+            source_id=source_id, current_targets=current_targets,
             _deferred=_deferred, _wait_started_at=_wait_started_at, _wait_replans=_wait_replans, repeat_candidate=repeat_candidate)
 
     @serialized_turn(lambda self, bot, group_id, *args, **kwargs: f"group_{group_id}", background=True)
@@ -295,6 +298,7 @@ class ProactiveManager:
         *,
         request_text: str,
         source_id: int | None = None,
+        current_targets: tuple[MessageTarget, ...] = (),
         _deferred: bool = False,
         _wait_started_at: Optional[float] = None,
         _wait_replans: int = 0,
@@ -336,6 +340,7 @@ class ProactiveManager:
                 is_direct=False,
                 default_action="silent",
                 repeat_candidate=repeat_candidate,
+                current_targets=current_targets,
                 current_source_ids=(source_id,) if source_id is not None else (),
             )
             if planner_decision.action == "wait":
@@ -346,6 +351,7 @@ class ProactiveManager:
                     request_text=request_text,
                     user_id=user_id,
                     source_id=source_id,
+                    current_targets=current_targets,
                     decision=planner_decision,
                     wait_started_at=_wait_started_at,
                     wait_replans=_wait_replans,
@@ -434,6 +440,8 @@ class ProactiveManager:
                         )
                         immediate_media_sent = image_was_sent_this_round() or voice_was_sent_this_round()
 
+                    run = getattr(response, "agent_run", None)
+                    requested_image_from = getattr(run, "requested_image_from", None)
                     if immediate_media_sent:
                         media_type = (
                             "image" if image_was_sent_this_round() else "voice"
@@ -454,6 +462,7 @@ class ProactiveManager:
                                 sent_followup = followup_text
                                 message_id = _get_event_message_id(receipt)
                                 followups.answered(group_id, sent_followup, direct=True,
+                                                   requested_image_from=requested_image_from,
                                                    message_ids=(message_id,) if message_id is not None else ())
                             except asyncio.CancelledError as exc:
                                 cancelled = exc
@@ -491,7 +500,7 @@ class ProactiveManager:
                             raise cancelled
                         return True
 
-                    if not getattr(getattr(response, "agent_run", None), "should_reply", True):
+                    if not getattr(run, "should_reply", True):
                         return poke_sent
                     if response or planned_meme:
                         # 清理回复内容
@@ -527,6 +536,7 @@ class ProactiveManager:
                                 sent_ids.append(message_id)
                             anchor_text = anchor_text or ("【我发了一张表情包】" + (sent_turn.sent_meme.get("description") or ""))
                         followups.answered(group_id, anchor_text, direct=True,
+                                           requested_image_from=requested_image_from if sent_turn.sent_texts and sent_turn.all_text_sent else None,
                                            closed=planner_decision.action == "close", message_ids=sent_ids)
                         self.mark_just_spoke(group_id)
                         self.set_cooldown(group_id)

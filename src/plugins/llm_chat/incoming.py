@@ -34,6 +34,7 @@ class ResolvedIncomingMessage:
     context_image_urls: list[str | None] = field(default_factory=list)
     unavailable_images: bool = False
     faces: list[str] = field(default_factory=list)
+    reply_info: Any = None
 
     @property
     def image_slots(self) -> list[str | None]:
@@ -459,7 +460,7 @@ async def _resolve_reply_context(
     bot: Bot,
     event: MessageEvent,
     budget: _ExpansionBudget,
-) -> tuple[Optional[str], list[str | None]]:
+) -> tuple[Optional[str], list[str | None], Any]:
     reply_info = getattr(event, "reply", None)
     reply_id = None
 
@@ -477,7 +478,7 @@ async def _resolve_reply_context(
                 break
 
         if not reply_id:
-            return None, []
+            return None, [], None
         try:
             reply_info = await _call_message_api(
                 bot,
@@ -485,10 +486,12 @@ async def _resolve_reply_context(
                 budget,
                 message_id=int(reply_id),
             )
+            if isinstance(reply_info, dict) and reply_info.get("message_id") is None:
+                reply_info = {**reply_info, "message_id": reply_id}
         except Exception as exc:
             logger.debug(f"[message_expand] get_msg 失败 id={reply_id}: {exc}")
             budget.unavailable_images = True
-            return "[引用回复]\n原消息：[无法读取，可能已撤回]", []
+            return "[引用回复]\n原消息：[无法读取，可能已撤回]", [], {"message_id": reply_id}
 
     sender = object_value(reply_info, "sender", {}) or {}
     _remember_sender(sender, budget)
@@ -502,7 +505,7 @@ async def _resolve_reply_context(
         budget,
         depth=0,
     )
-    return f"[引用回复]\n被回复者：{name}\n原消息：{quoted or '[空消息]'}", image_urls
+    return f"[引用回复]\n被回复者：{name}\n原消息：{quoted or '[空消息]'}", image_urls, reply_info
 
 
 async def _resolve_forward_contexts(
@@ -591,7 +594,7 @@ async def resolve_incoming_message(
 
     budget = _ExpansionBudget(group_id=getattr(event, "group_id", None), self_id=str(event.self_id))
     _remember_sender(getattr(event, "sender", {}), budget, cache=True)
-    reply_block, reply_images = await _resolve_reply_context(bot, event, budget)
+    reply_block, reply_images, reply_info = await _resolve_reply_context(bot, event, budget)
     forward_blocks, forward_images = await _resolve_forward_contexts(
         bot,
         event,
@@ -610,6 +613,7 @@ async def resolve_incoming_message(
         context_image_urls=[*reply_images, *forward_images],
         unavailable_images=budget.unavailable_images or None in direct_images,
         faces=await get_faces_from_message(event),
+        reply_info=reply_info,
     )
     try:
         setattr(event, "_llm_resolved_incoming_message", result)

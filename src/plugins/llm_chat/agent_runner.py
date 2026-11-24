@@ -101,6 +101,7 @@ class AgentRunner:
         self.response_mode = "factual"
         self.planning_result = ""
         self.should_reply = True
+        self.requested_image_from: int | None = None
         self.reply_requirements = []
         self.reply_mode = ""
         self.answer_draft = ""
@@ -984,6 +985,12 @@ class AgentRunner:
                 addressing = getattr(self.reply_policy, "addressing", None)
                 if addressing is not None and not self.media_delivered:
                     addressing.revise(plan.get("addressing"))
+                if addressing is not None:
+                    self.requested_image_from = next((
+                        row.user_id for row in addressing.candidates
+                        if str(row.user_id) == str(plan.get("requested_image_from"))
+                        and str(row.user_id) != addressing.bot_self_id
+                    ), None)
                 self.response_mode = plan["response_mode"]
                 self.should_reply = plan["should_reply"]
                 self.reply_requirements = plan["reply_requirements"]

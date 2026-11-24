@@ -12,6 +12,32 @@ from src.plugins.llm_chat.planner import PlannerDecision, _normalize_decision
 
 
 class ProactiveMediaTests(unittest.IsolatedAsyncioTestCase):
+    async def test_image_invitation_tracks_only_delivered_text(self):
+        from src.plugins.llm_chat.models import ChatResponse
+        from src.plugins.llm_chat.planner import ReplyPart
+
+        async def deliver(_text, send):
+            return await send()
+
+        for failed_part in (1, 2, None):
+            with self.subTest(failed_part=failed_part):
+                followups.windows.pop(99, None)
+                manager = proactive.ProactiveManager()
+                response = ChatResponse("这个位置我看不清\n\n图可以再发一次吗")
+                response.agent_run = SimpleNamespace(should_reply=True, requested_image_from=42, deliver=deliver)
+                receipts = [RuntimeError("发送失败") if part == failed_part else {} for part in (1, 2)]
+                bot = SimpleNamespace(self_id=999, send_group_msg=AsyncMock(side_effect=receipts))
+                decision = PlannerDecision(parts=[ReplyPart("text"), ReplyPart("text")])
+                with (
+                    patch.object(proactive.config, "enable_proactive", True),
+                    patch.object(proactive, "plan_chat_action", AsyncMock(return_value=decision)),
+                    patch.object(manager, "generate_proactive_response", AsyncMock(return_value=response)),
+                    patch.object(proactive.memory_manager, "add_message", AsyncMock()),
+                    patch("src.plugins.llm_chat.turns.asyncio.sleep", AsyncMock()),
+                ):
+                    await manager.try_proactive(bot, 99, "图里那块干什么用", user_id=42)
+                self.assertEqual(bool(followups.snapshot(99, requested_image_from=42)), failed_part is None)
+
     async def test_meme_only_skips_generation_and_records_only_success(self):
         from src.plugins.llm_chat.planner import ReplyPart
         for picked, sent in ((True, True), (True, False), (False, False)):

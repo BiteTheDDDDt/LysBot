@@ -144,12 +144,13 @@ async def run_stages(manager, messages, *, model, role, caller, session_id,
     request = current_user_message(messages)
     instructions = [m for m in messages if m.role == "system"]
     background = [m for m in messages if m is not request and m.role != "system" and not m.is_thinking]
-    proactive = getattr(runner.reply_policy, "scene", None) == "proactive"
+    optional_participation = runner.reply_policy and runner.reply_policy.optional_participation
     addressing = getattr(runner.reply_policy, "addressing", None)
     if addressing is not None and addressing.candidates:
         planning_address_message = Message(role="system", content=(
             "最终 JSON 的 addressing 用于指定送达。暂定送达符合本轮原请求时可以沿用，空数组或 null 清除对应选择。"
             + ADDRESSING_GUIDE
+            + "若本轮最终回复确实请一位群友补图，在最终 JSON 顶层填 requested_image_from 为该人的候选 QQ 号，收到图时可以接回本轮。其余情况省略。"
             + "转交任务时，content 写直接对收话人说的请求，无需先代他们完成任务。"
             "媒体工具沿用参与规划的送达，媒体已经发送后本轮送达保持不变。引用从以下消息候选选；收话人和 @ 也可以用本轮 get_group_facts(scope=member) 确认在本群的成员。以下是真实事件候选ID。\n"
             + json.dumps([row.as_candidate(allow_reply=addressing.allow_reply)
@@ -177,7 +178,7 @@ async def run_stages(manager, messages, *, model, role, caller, session_id,
     if runner.working_context:
         planning_messages.append(Message(role="user", content=runner.working_context, is_reference=True))
     if request is not None:
-        label = "【本轮群聊消息】\n" if proactive else "【本轮请求】\n"
+        label = "【本轮群聊消息】\n" if optional_participation else "【本轮请求】\n"
         planning_messages.append(replace(request, content=label + request.content))
     plan = await manager._chat_impl(
         planning_messages, model=None, role="planner", caller=caller + ":plan",
@@ -193,8 +194,8 @@ async def run_stages(manager, messages, *, model, role, caller, session_id,
     runner.planning_result = str(plan)[:4000]
     await runner.checkpoint()
     await runner.validate_scope()
-    if proactive and not runner.should_reply:
-        general_logger.info("[主动发言] 执行规划决定放弃本轮参与，未发送消息")
+    if optional_participation and not runner.should_reply:
+        general_logger.info("[群聊参与] 执行规划选择旁听，跳过本轮文字生成")
         return ChatResponse("", usage=getattr(plan, "usage", None))
     # The execution planner has the latest context and can shorten or expand
     # ordinary replies. An earlier participation decision is only provisional.
@@ -241,7 +242,7 @@ async def run_stages(manager, messages, *, model, role, caller, session_id,
         )),
     ])
     if request is not None:
-        label = "群聊触发消息：" if proactive else "用户本轮问题："
+        label = "群聊触发消息：" if optional_participation else "用户本轮问题："
         rendering_messages.append(Message(role="user", content=label + request.content))
     try:
         result = await manager._chat_impl(

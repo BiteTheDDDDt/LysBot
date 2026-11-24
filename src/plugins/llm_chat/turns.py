@@ -23,6 +23,7 @@ class SentTurn:
 
     sent_texts: list[str]
     sent_meme: Optional[dict]
+    all_text_sent: bool = True
 
     @property
     def sent_anything(self) -> bool:
@@ -240,4 +241,5 @@ async def send_response_turn(
             logger.warning("[turn] 后续发送中断，保留已经发出的回复记录")
             break
 
-    return SentTurn(sent_texts=sent_texts, sent_meme=sent_meme)
+    planned_texts = sum(kind == "text" for kind, _ in items)
+    return SentTurn(sent_texts=sent_texts, sent_meme=sent_meme, all_text_sent=len(sent_texts) == planned_texts)

@@ -11,7 +11,8 @@ MENTION_SLOT = re.compile(r"⟦at[0-9]+⟧")
 ADDRESSING_GUIDE = (
     "reply_to_message_id 标记所接的原消息，audience_user_ids 指定正文说给谁，mention_user_ids 指定要叫到谁。"
     "回应本轮发言时用该发言作为引用来源。被它引用的人和正文里提到的人可能只是背景。"
-    "用户要求让某位群友或群里约定的角色做事时，本轮交付是把任务发给他们。"
+    "先看原话、引用作者和原生 @，分清请求交给了谁。群友交办给别人的事由对方承接；"
+    "请你转交给某位群友或群里约定的角色时，把任务发给接手人。"
     "handoff_user_ids 填接手人的账号数组，系统会以他们为收话人并原生 @。"
     "正文直接交代原任务。用户要求你先完成工作再发给别人时，按普通答复规划。"
 )
@@ -25,11 +26,15 @@ class MessageTarget:
     names: tuple[str, ...] = ()
     origin: str = field(default="recent", compare=False)
     quoted_message_id: int | None = field(default=None, compare=False)
+    quoted_user_id: int | None = field(default=None, compare=False)
+    mentioned_user_ids: tuple[int, ...] = field(default=(), compare=False)
 
     def as_candidate(self, *, allow_reply: bool = True) -> dict:
         return {"message_id": self.message_id if allow_reply else None,
                 "user_id": self.user_id, "names": self.names, "origin": self.origin,
-                "quoted_message_id": self.quoted_message_id if allow_reply else None, "text": self.text[:180]}
+                "quoted_message_id": self.quoted_message_id if allow_reply else None, "text": self.text[:180],
+                **({"quoted_user_id": self.quoted_user_id} if self.quoted_user_id else {}),
+                **({"mentioned_user_ids": self.mentioned_user_ids} if self.mentioned_user_ids else {})}
 
 
 @dataclass

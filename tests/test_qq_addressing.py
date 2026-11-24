@@ -167,7 +167,7 @@ class AddressingTests(unittest.IsolatedAsyncioTestCase):
     async def test_execution_plan_revises_shared_delivery_but_not_sent_media(self):
         adapter = models.OpenAICompatibleAdapter("openai:test", "dummy", "https://example.test/v1", "test")
         payload = json.dumps({"response_mode": "social", "verify_group_identity": False,
-                              "content": "直接把任务交给对方", "addressing": {
+                              "content": "请对方把刚才提到的图发来", "requested_image_from": "202", "addressing": {
                                   "audience_user_ids": [202], "mention_user_ids": [202]}})
         try:
             for delivered in (False, True):
@@ -183,6 +183,7 @@ class AddressingTests(unittest.IsolatedAsyncioTestCase):
                         await adapter.chat([models.Message("user", "叫他来帮忙", sender_id=101)], tools_enabled=True)
                     self.assertEqual(address.mentions, () if delivered else (202,))
                     self.assertEqual(address.audience, () if delivered else (202,))
+                    self.assertEqual(runner.requested_image_from, 202)
                 finally:
                     agent_runner.current_run.reset(token)
         finally:

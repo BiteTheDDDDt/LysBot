@@ -70,6 +70,21 @@ class PlannerMediaTests(unittest.IsolatedAsyncioTestCase):
                     )
                     self.assertEqual([part.type for part in decision.parts], ["text"])
 
+    async def test_later_quote_preserves_earlier_current_messages_recipients(self):
+        first = MessageTarget(81, 101, "去问问她", origin="current", mentioned_user_ids=(303,))
+        second = MessageTarget(82, 202, "我也想知道", origin="current", quoted_message_id=81, quoted_user_id=101)
+        quoted = MessageTarget(81, 101, "去问问她", origin="quoted")
+        with (
+            patch.object(planner, "_resolve_planner_context", AsyncMock(return_value="")),
+            patch.object(planner.model_manager, "chat", AsyncMock(return_value='{"action":"reply"}')),
+        ):
+            plan = await planner.plan_chat_action(
+                session_id="group_7", group_id=7, current_message=second.text,
+                current_targets=(first, second, quoted),
+            )
+        row, = [target for target in plan.addressing.candidates if target.message_id == 81]
+        self.assertEqual((row.origin, row.mentioned_user_ids), ("current", (303,)))
+
     async def test_selects_existing_followup_anchor_instead_of_assuming_latest(self):
         with (
             patch.object(planner, "_resolve_planner_context", AsyncMock(return_value="")),
@@ -130,7 +145,8 @@ class PlannerMediaTests(unittest.IsolatedAsyncioTestCase):
     async def test_planner_prompt_loads_recent_session_history(self):
         recent = [
             planner.LLMMessage(role="user", content="我想要安静一点的语气", name="用户"),
-            planner.LLMMessage(role="assistant", content="Bot: 好，我记下了。"),
+            planner.LLMMessage(role="assistant", content="好，我记下了。", model_spec="example:writer-a"),
+            planner.LLMMessage(role="assistant", content="嗯，照之前说的来。"),
         ]
         planner_call = AsyncMock(
             return_value=(
@@ -159,7 +175,8 @@ class PlannerMediaTests(unittest.IsolatedAsyncioTestCase):
         )
         prompt = planner_call.await_args.args[0][0].content
         self.assertIn("我想要安静一点的语气", prompt)
-        self.assertIn("好，我记下了", prompt)
+        self.assertIn("Bot（writer-a）: 好，我记下了", prompt)
+        self.assertIn("Bot: 嗯，照之前说的来", prompt)
         self.assertIn("当前消息:\n那就念给我听", prompt)
         self.assertIn("可选 action：reply | close | silent | wait", prompt)
         self.assertIn("这句没必要接时用 silent", prompt)

@@ -49,10 +49,15 @@ IMAGE_FAILURE = "这次没能读到图片，可以重新发一下。"
 MISSING_IMAGE_GUIDANCE = "按每条消息的原始图片编号回答可见内容，简短指出需要重发的图片编号。"
 
 
-async def _send_request_notice(bot, event, group_id, text):
+async def _send_request_notice(bot, event, group_id, text, *, requests_image=False):
     ensure_send_allowed(group_id)
     try:
-        await bot.send(event, text)
+        receipt = await bot.send(event, text)
+        if group_id and requests_image:
+            from . import followups
+            message_id = _get_event_message_id(receipt)
+            followups.answered(group_id, text, direct=True, requested_image_from=event.user_id,
+                               message_ids=(message_id,) if message_id is not None else ())
     except Exception as error:
         logger.warning(f"[聊天反馈] 发送失败 group={group_id}: {type(error).__name__}")
 
@@ -255,26 +260,33 @@ def _get_event_message_id(event: MessageEvent) -> Optional[int]:
         return None
 
 
+def _event_reply(event: MessageEvent):
+    resolved = getattr(event, "_llm_resolved_incoming_message", None)
+    return getattr(event, "reply", None) or getattr(resolved, "reply_info", None)
+
+
 def _event_message_targets(event: MessageEvent, message: str, *, user_id: int | None = None) -> tuple[MessageTarget, ...]:
     sender = getattr(event, "sender", None)
     names = tuple(name for key in ("card", "nickname") if (name := object_value(sender, key, "")))
-    reply = getattr(event, "reply", None)
+    reply = _event_reply(event)
     quoted_message_id = _get_event_message_id(reply)
-    current = MessageTarget(_get_event_message_id(event), user_id if user_id is not None else event.user_id,
-                            current_request_text(event, message), names, "current", quoted_message_id)
-    targets = [current]
+    sender_id = str(object_value(object_value(reply, "sender"), "user_id", ""))
+    quoted_user_id = int(sender_id) if sender_id.isdecimal() and int(sender_id) > 0 else None
+    mentioned = []
     for segment in getattr(event, "original_message", None) or getattr(event, "message", ()):
         if segment.type == "at":
             raw_id = str(segment.data.get("qq", ""))
-            if raw_id.isdecimal() and int(raw_id) > 0:
-                targets.append(MessageTarget(None, int(raw_id), "本轮消息原生 @ 的对象", origin="mentioned"))
-    reply = getattr(event, "reply", None)
-    if reply is not None:
-        sender_id = getattr(getattr(reply, "sender", None), "user_id", None)
-        if quoted_message_id is not None and isinstance(sender_id, int):
-            quoted = getattr(reply, "message", None)
-            excerpt = quoted.extract_plain_text() if isinstance(quoted, Message) else ""
-            targets.append(MessageTarget(quoted_message_id, sender_id, excerpt or "本轮所引用的消息", origin="quoted"))
+            if raw_id.isdecimal() and (uid := int(raw_id)) > 0 and uid not in mentioned:
+                mentioned.append(uid)
+    current = MessageTarget(_get_event_message_id(event), user_id if user_id is not None else event.user_id,
+                            current_request_text(event, message), names, "current", quoted_message_id,
+                            quoted_user_id, tuple(mentioned))
+    targets = [current, *(MessageTarget(None, uid, "本轮消息原生 @ 的对象", origin="mentioned") for uid in mentioned)]
+    if quoted_message_id is not None and quoted_user_id is not None:
+        segments = as_segment_list(object_value(reply, "message"))
+        excerpt = "".join(str(data.get("text", "")) for kind, data in map(segment_type_and_data, segments)
+                          if kind == "text")
+        targets.append(MessageTarget(quoted_message_id, quoted_user_id, excerpt or "本轮所引用的消息", origin="quoted"))
     return tuple(targets)
 
 
@@ -457,14 +469,16 @@ async def _finish_response_turn(bot, event, user_id, group_id, *, direct, respon
         if message_id is not None:
             sent_ids.append(message_id)
 
-    def record_followup(value):
+    def record_followup(value, *, all_text_sent=True):
         if group_id:
             from . import followups
             anchor_id = planner_decision.followup_anchor if planner_decision else None
             if direct:
-                anchor_id = followups.quoted_anchor(group_id, _get_event_message_id(getattr(event, "reply", None)))
+                anchor_id = followups.quoted_anchor(group_id, _get_event_message_id(_event_reply(event)))
+            run = getattr(response, "agent_run", None)
             followups.answered(group_id, value, direct=direct,
                                closed=bool(planner_decision and planner_decision.action == "close"),
+                               requested_image_from=getattr(run, "requested_image_from", None) if all_text_sent else None,
                                anchor_id=anchor_id, message_ids=sent_ids)
 
     async def send_media_followup(value):
@@ -475,6 +489,8 @@ async def _finish_response_turn(bot, event, user_id, group_id, *, direct, respon
                                            send_followup=send_media_followup, model_spec=model_spec):
         return
 
+    if reply_policy.optional_participation and not getattr(getattr(response, "agent_run", None), "should_reply", True):
+        return
     sent_turn = await send_response_turn(text=text, decision=planner_decision, planned_meme=planned_meme,
                                          send_text=send_text, reply_policy=reply_policy, group_chat=bool(group_id))
     if not sent_turn.sent_anything:
@@ -482,7 +498,7 @@ async def _finish_response_turn(bot, event, user_id, group_id, *, direct, respon
     try:
         if group_id:
             proactive_manager.mark_just_spoke(group_id)
-            record_followup(sent_turn.text_for_memory)
+            record_followup(sent_turn.text_for_memory, all_text_sent=sent_turn.all_text_sent)
         history_text = _build_assistant_history_text(sent_turn.text_for_memory, sent_turn.sent_meme)
         await memory_manager.add_message(0 if group_id else user_id, "assistant", history_text, group_id,
                                          model_spec=model_spec if sent_turn.text_for_memory else None)
@@ -624,9 +640,11 @@ def _group_message_direction(
     self_id = str(getattr(event, "self_id", ""))
     targets_bot = False
     targets_other = False
-    reply = getattr(event, "reply", None)
+    reply = _event_reply(event)
     reply_sender = object_value(object_value(reply, "sender", None), "user_id", None)
-    if reply_sender and str(reply_sender) != self_id:
+    # Quoting one's own picture can identify the image we just asked to see.
+    own_image = bool(getattr(event, "_llm_image_followups", None)) and str(reply_sender) == str(event.user_id)
+    if reply_sender and str(reply_sender) != self_id and not own_image:
         targets_other = True
     segment_sources = [getattr(event, "message", [])]
     original_message = getattr(event, "original_message", None)
@@ -639,7 +657,7 @@ def _group_message_direction(
                 continue
             if str(segment.data.get("qq", "")) == self_id:
                 targets_bot = True
-            else:
+            elif not (own_image and str(segment.data.get("qq", "")) == str(event.user_id)):
                 targets_other = True
 
     if getattr(event, "to_me", False):
@@ -762,6 +780,7 @@ async def _record_group_message(bot: Bot, event: GroupMessageEvent):
     # A proactive reply to this event must not make the same event its own followup.
     from . import followups
     event._llm_followup_snapshot = followups.snapshot(group_id)
+    requested_images = followups.snapshot(group_id, requested_image_from=user_id)
     event._llm_received_at = asyncio.get_running_loop().time()
 
     # Persist arrival order before reference expansion, downloads or model calls.
@@ -790,14 +809,18 @@ async def _record_group_message(bot: Bot, event: GroupMessageEvent):
     ensure_current_session()
     plain_message = resolved.plain_text
     message = resolved.compose()
+    event._llm_image_followups = requested_images if resolved.image_slots else {}
     is_to_bot, directed_at_other = _group_message_direction(event, plain_message)
+    if directed_at_other:
+        event._llm_image_followups = {}
     if directed_at_other and not is_to_bot and _eligible_event_followup(event):
         followups.skip(group_id, _event_followups(event))
     image_urls = resolved.image_urls
 
     # Non-directed pictures enrich their original row in the background. Direct
     # questions still wait for observations before planner/chat consume them.
-    if image_urls and not is_to_bot and not (plain_message.strip() and _eligible_event_followup(event, directed_at_other)):
+    followup_input = plain_message.strip() or event._llm_image_followups
+    if image_urls and not is_to_bot and not (followup_input and _eligible_event_followup(event, directed_at_other)):
         if len(_incoming_image_tasks) >= max(1, config.incoming_image_max_pending):
             content = f"【群员-{sender_name}】 {message} [图片暂未识别：后台繁忙]".strip()
             if stored_message is not None:
@@ -917,11 +940,8 @@ async def _enrich_group_record(bot, event, resolved, stored_message, sender_name
                 f"图片{index}（自动识别，仅作背景）: {image_descriptions[url]}"
                 for index, url in enumerate(resolved.image_slots, 1) if url in image_descriptions
             )
-            formatted_content = (
-                f"[{sender_name}] {desc_text}\n\n用户消息: {body}"
-                if body
-                else f"[{sender_name}] {desc_text}\n\n用户消息: [仅分享图片，未提出问题]"
-            )
+            no_caption = "[未附文字]" if getattr(event, "_llm_image_followups", None) else "[仅分享图片，未提出问题]"
+            formatted_content = f"[{sender_name}] {desc_text}\n\n用户消息: {body or no_caption}"
         elif not body and not faces:
             formatted_content = f"【群员-{sender_name}】 [图片识别失败]"
 
@@ -977,8 +997,14 @@ async def _enrich_group_record(bot, event, resolved, stored_message, sender_name
     if not (directed_at_other or image_urls or faces) and repeat_manager.is_candidate(group_id, plain_message):
         repeat_candidate = plain_message
     kwargs = {"repeat_candidate": repeat_candidate} if repeat_candidate else {}
+    # A caption and its image arrive together. The planner needs the same
+    # bounded visual background it already sees for a caption sent just after a picture.
+    trigger_content = proactive_content
+    if image_urls and plain_message.strip():
+        trigger_content = unsolicited_view(formatted_content, include_observation=True)
     await proactive_manager.try_proactive(
-        bot, group_id, proactive_content, user_id, request_text=plain_message, _recorded=True,
+        bot, group_id, trigger_content, user_id, request_text=plain_message, _recorded=True,
+        current_targets=_event_message_targets(event, plain_message),
         source_id=getattr(event, "_llm_memory_source_id", None), **kwargs,
     )
 
@@ -1000,7 +1026,8 @@ async def should_respond(event: MessageEvent) -> bool:
     if isinstance(event, GroupMessageEvent):
         message = event.get_plaintext().strip()
         targets_bot, directed_elsewhere = _group_message_direction(event, message)
-        return targets_bot or bool(message and _eligible_event_followup(event, directed_elsewhere))
+        return targets_bot or bool((message or getattr(event, "_llm_image_followups", None))
+                                   and _eligible_event_followup(event, directed_elsewhere))
 
     return False
 
@@ -1011,6 +1038,9 @@ def _eligible_event_followup(event, directed_elsewhere=False):
 
 def _event_followups(event):
     from . import followups
+    if requested := getattr(event, "_llm_image_followups", None):
+        active = followups.snapshot(event.group_id, requested_image_from=event.user_id)
+        return {key: text for key, text in requested.items() if active.get(key) == text}
     visible = followups.snapshot(event.group_id)
     arrival = getattr(event, "_llm_followup_snapshot", visible)
     return {key: arrival[key] for key in visible if key in arrival}
@@ -1169,11 +1199,13 @@ async def _handle_chat(bot: Bot, event: MessageEvent):
 
     # 如果没有消息内容，设置默认
     if not message:
-        if not images_base64 and not faces:
+        if getattr(event, "_llm_image_followups", None):
+            message = "[补充图片，未附文字]" if images_base64 else "[补充的图片未能读取]"
+        elif not images_base64 and not faces:
             if getattr(event, "_llm_image_slots", ()) and _group_message_direction(event, event.get_plaintext())[0]:
-                await _send_request_notice(bot, event, group_id, IMAGE_FAILURE)
+                await _send_request_notice(bot, event, group_id, IMAGE_FAILURE, requests_image=True)
             return
-        if images_base64:
+        elif images_base64:
             message = "请描述这张图片"
         elif faces:
             message = " "

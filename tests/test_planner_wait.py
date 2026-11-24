@@ -10,6 +10,7 @@ nonebot.init()
 
 from src.plugins.llm_chat import chat, planner, proactive
 from src.plugins.llm_chat.planner import PlannerDecision
+from src.plugins.llm_chat.qq_addressing import MessageTarget
 
 
 class PlannerWaitTests(unittest.IsolatedAsyncioTestCase):
@@ -99,13 +100,16 @@ class PlannerWaitTests(unittest.IsolatedAsyncioTestCase):
         async def gated_sleep(_delay):
             await gate.wait()
         plan = AsyncMock(side_effect=[PlannerDecision(action='wait', wait_seconds=10), PlannerDecision(action='silent')])
+        targets = (MessageTarget(31, 101, '群友还在分段输入', origin='current', mentioned_user_ids=(202,)),)
         with patch.object(proactive.config, 'enable_proactive', True), patch.object(proactive.config, 'planner_wait_max_seconds', 120), patch.object(proactive.config, 'planner_wait_max_replans', 3), patch.object(manager, 'is_on_cooldown', return_value=False), patch.object(manager, 'is_on_planner_cooldown', return_value=False), patch.object(proactive, 'plan_chat_action', plan), patch.object(proactive.asyncio, 'sleep', side_effect=gated_sleep):
-            result = await manager.try_proactive(SimpleNamespace(self_id='999'), group_id=79, message='群友还在分段输入', user_id=101)
+            result = await manager.try_proactive(SimpleNamespace(self_id='999'), group_id=79, message='群友还在分段输入',
+                                                 user_id=101, current_targets=targets)
             self.assertFalse(result)
             wait_task = manager._wait_tasks[79]
             gate.set()
             await wait_task
         self.assertEqual(plan.await_count, 2)
+        self.assertIs(plan.await_args_list[1].kwargs['current_targets'], targets)
         self.assertEqual(plan.await_args_list[1].kwargs['recent_context'], '用户101: 群友还在分段输入')
         self.assertNotIn(79, manager._wait_tasks)
 

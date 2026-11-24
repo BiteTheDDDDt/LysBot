@@ -137,6 +137,26 @@ class AggregatedChatTests(unittest.IsolatedAsyncioTestCase):
         bot.send.assert_awaited_once()
         self.assertEqual(followups.active(99).answer, "天空换成什么颜色？")
 
+    async def test_declined_implicit_reply_does_not_deliver_its_preselected_meme(self):
+        from src.plugins.llm_chat.models import ChatResponse
+        from src.plugins.llm_chat.planner import PlannerDecision, ReplyPart
+        from src.plugins.llm_chat.reply_policy import select_reply_policy
+
+        decision = PlannerDecision(parts=[ReplyPart("text"), ReplyPart("meme", "funny")], followup_anchor=2)
+        response = ChatResponse("")
+        response.agent_run = SimpleNamespace(should_reply=False)
+        with (patch.object(chat, "_finalize_immediate_tool_turn", AsyncMock(return_value=False)) as finalize,
+              patch.object(chat, "send_response_turn", AsyncMock()) as send,
+              patch.object(chat.memory_manager, "add_message", AsyncMock()) as save):
+            await chat._finish_response_turn(
+                SimpleNamespace(), self._pending_message(42, "甲", "还是那个条件").event, 42, 99,
+                direct=False, response=response, reply_policy=select_reply_policy([], decision=decision),
+                planner_decision=decision, planned_meme={"topic": "funny"},
+            )
+        finalize.assert_awaited_once()
+        send.assert_not_awaited()
+        save.assert_not_awaited()
+
     async def test_merged_model_error_can_finalize_media_for_primary_user(self):
         pending = self._pending_message(42, "甲", "请发语音")
         bot = SimpleNamespace(send=AsyncMock())

@@ -12,6 +12,7 @@ class Window:
     expires: float
     answer: str
     message_ids: tuple[int, ...] = ()
+    requested_image_from: int | None = None
 
 
 windows: dict[int, dict[int, Window]] = {}
@@ -34,8 +35,9 @@ def active(group):
     return next(reversed(_active(group).values()), None)
 
 
-def snapshot(group) -> dict[int, str]:
-    return {key: window.answer for key, window in _active(group).items()}
+def snapshot(group, *, requested_image_from=None) -> dict[int, str]:
+    return {key: window.answer for key, window in _active(group).items()
+            if requested_image_from is None or window.requested_image_from == requested_image_from}
 
 
 def quoted_anchor(group, message_id: int | None) -> int | None:
@@ -52,7 +54,7 @@ def skip(group, anchor_ids=None):
             window.expires = min(window.expires, deadline)
 
 
-def answered(group, text, *, direct, closed=False, anchor_id=None, message_ids=()):
+def answered(group, text, *, direct, closed=False, anchor_id=None, message_ids=(), requested_image_from=None):
     if not group:
         return
     matches = _active(group)
@@ -78,9 +80,10 @@ def answered(group, text, *, direct, closed=False, anchor_id=None, message_ids=(
     if previous:
         previous.answer = text[:600]
         previous.expires = expires
+        previous.requested_image_from = requested_image_from
         if message_ids:
             previous.message_ids = tuple(message_ids)
-    matches[anchor_id] = previous or Window(expires, text[:600], tuple(message_ids))
+    matches[anchor_id] = previous or Window(expires, text[:600], tuple(message_ids), requested_image_from)
     windows[group] = matches
 
 
@@ -94,8 +97,8 @@ def context(group, records=None):
         "对方回应你近期发言中的具体问题、邀请或梗，或补充、纠正、反馈同一件事时，可以自然续上。"
         "不同群友也可以接住你的话，判断依据是具体内容。话题相同或时间相邻只能辅助判断；群友也可能是在彼此交流。"
         "填写 followup_target=bot|other|unclear。选 bot 时填写对应的 followup_anchor_id，并在 followup_evidence 写清具体对应；"
-        "对象是别人或不清楚时旁听。确定在接你的话后，再判断现在出声能补什么。"
-        "具体追问、纠正、新线索或值得接的梗可以回应，重复前面的内容或群友已经接住时可以 silent。"
+        "对象是别人或不清楚时旁听。确定在接你的话后，对照那条已发回复：这次回答会多解决哪个问题、补哪条观点，或接住哪个笑点？"
+        "若只能换个例子重说同一结论，或对方已接过你的提醒继续讨论，选 silent。"
         "几句连着说的内容当成一轮来听，有一个值得回应的点就只接那个点。"
         "近期可接的 Bot 回复（对话资料，candidate_message_ids 是当时已经看到该回复的候选消息编号）：\n"
         + json.dumps(records, ensure_ascii=False)
