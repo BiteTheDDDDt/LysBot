@@ -40,10 +40,10 @@ class ProactiveValueTests(unittest.IsolatedAsyncioTestCase):
         plan = AsyncMock(return_value=planner.PlannerDecision(action="silent"))
         with patch.object(proactive, "time", clock), patch.object(proactive, "plan_chat_action", plan):
             self.assertFalse(await manager.try_proactive(bot, 7, "群友第一句", 42, source_id=13))
-            now += 60
+            now += 30 * 60 - 1
             self.assertFalse(await manager.try_proactive(bot, 7, "中间的补充", 43, source_id=14))
             plan.assert_awaited_once()
-            now += proactive.PLANNER_COOLDOWN_SECONDS - 60
+            now += 1
             self.assertFalse(await manager.try_proactive(bot, 7, "最新一句", 42, source_id=15))
             self.assertEqual(plan.await_count, 2)
             self.assertIn("中间的补充", plan.await_args.kwargs["recent_context"])
