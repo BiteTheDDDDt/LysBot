@@ -58,6 +58,26 @@ class AggregatedChatTests(unittest.IsolatedAsyncioTestCase):
             await asyncio.wait_for(chat.delayed_process(object(),918), timeout=0.5)
         handle.assert_awaited_once()
 
+    async def test_busy_implicit_window_uses_one_decision_and_requested_turns_keep_their_budget(self):
+        items = [self._pending_message(42, "甲", str(i)) for i in range(9)]
+        for item in items:
+            item.event.to_me = False
+            item.event.user_id = item.user_id
+        buffer = chat.AggregationBuffer(messages=items.copy())
+        chat.aggregation_buffers[916] = buffer
+        handle = AsyncMock()
+        with patch.object(chat.config, "aggregation_max_messages", 3), patch.object(chat, "handle_merged_chat", handle):
+            self.assertIsNone(buffer.first_requested())
+            await chat.process_aggregated_messages(object(), 916)
+            self.assertEqual(handle.await_args.args[2], items)
+            buffer.messages = items.copy()
+            items[2].event._llm_image_followups = {1: "请补图"}
+            self.assertEqual(buffer.first_requested(), 2)
+            items[0].event.to_me = True
+            self.assertEqual(buffer.first_requested(), 0)
+            await chat.process_aggregated_messages(object(), 916)
+            self.assertEqual(handle.await_args.args[2], items[:3])
+
     async def test_implicit_messages_use_the_group_aggregation_window(self):
         bot = object()
         handle = AsyncMock()

@@ -107,6 +107,10 @@ class AggregationBuffer:
     last_received_at: float = 0.0
     wakeup: asyncio.Event = field(default_factory=asyncio.Event)
 
+    def first_requested(self) -> int | None:
+        return next((i for i, item in enumerate(self.messages)
+                     if item.directed_to_bot or getattr(item.event, "_llm_image_followups", None)), None)
+
 
 # 群消息聚合缓冲区：{group_id: AggregationBuffer}
 aggregation_buffers: dict[int, AggregationBuffer] = {}
@@ -534,6 +538,10 @@ async def process_aggregated_messages(bot: Bot, group_id: int):
     if not buffer or not buffer.messages:
         return
     count = max(1, int(config.aggregation_max_messages))
+    first_requested = buffer.first_requested()
+    # Ordinary follow-ups share a decision. Keep requested turns on their
+    # existing batch budget even when several bystanders spoke first.
+    count = len(buffer.messages) if first_requested is None else first_requested + count
     batch = buffer.messages[:count]
     del buffer.messages[:count]
     sid = session_key(0, group_id)
@@ -559,8 +567,9 @@ async def delayed_process(bot: Bot, group_id: int):
     try:
         while buffer.messages:
             while True:
-                quiet_deadline = buffer.last_received_at + max(0, float(config.aggregation_window))
-                hard_deadline = buffer.first_received_at + max(0.1, float(config.aggregation_max_wait_seconds))
+                pace = 3 if buffer.first_requested() is None else 1
+                quiet_deadline = buffer.last_received_at + pace * max(0, float(config.aggregation_window))
+                hard_deadline = buffer.first_received_at + pace * max(0.1, float(config.aggregation_max_wait_seconds))
                 delay = min(quiet_deadline, hard_deadline) - loop.time()
                 if delay <= 0:
                     break
@@ -1513,6 +1522,7 @@ async def handle_merged_chat(bot: Bot, group_id: int, pending_messages: list[Pen
     if not direct and not anchors:
         return
     combined = "\n".join(f"【群员-{format_sender_name(pm.sender_name)} QQ:{pm.user_id}】 {pm.message}" for pm in pending_messages)
+    proactive_manager.set_planner_cooldown(group_id)
     decision = await _plan_chat_request(
         bot, pending_messages[0].event,
         session_id=f"group_{group_id}", group_id=group_id, current_message=combined,

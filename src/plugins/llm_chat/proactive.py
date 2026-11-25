@@ -20,8 +20,8 @@ from .turns import is_meme_only, prepare_planned_meme, send_response_turn
 from .conversation import ensure_send_allowed, serialized_turn
 
 # Internal participation tuning; not operator-facing settings.
-CHECK_WINDOW_SECONDS = 180
-PLANNER_COOLDOWN_SECONDS = 120
+PLANNER_COOLDOWN_SECONDS = 300
+CHECK_WINDOW_SECONDS = PLANNER_COOLDOWN_SECONDS
 
 
 @dataclass
