@@ -100,7 +100,7 @@ class DigestRepository:
         published_at: Optional[datetime] = None,
         briefing_date: date | str | None = None,
     ) -> None:
-        """保存已成功发送的结构化简报，供后续新闻播报使用。"""
+        """保存结构化简报及投递结果。只有确认送达的简报供新闻播报使用。"""
         published_at = published_at or datetime.now()
         if isinstance(briefing_date, date):
             briefing_date_value = briefing_date.isoformat()
@@ -155,7 +155,8 @@ class DigestRepository:
         date_value = briefing_date.isoformat() if isinstance(briefing_date, date) else str(briefing_date)
         db = await self._get_db()
         async with db.execute(
-            "SELECT 1 FROM daily_briefings WHERE group_id = ? AND briefing_date = ? LIMIT 1",
+            "SELECT 1 FROM daily_briefings WHERE group_id = ? AND briefing_date = ? "
+            "AND sent_as IN ('image', 'text') LIMIT 1",
             (int(group_id), date_value),
         ) as cursor:
             return await cursor.fetchone() is not None
@@ -170,7 +171,9 @@ class DigestRepository:
             FROM daily_briefings AS b
             LEFT JOIN news_broadcasts AS n ON n.briefing_id = b.id
             WHERE b.published_at >= ?
-              AND b.id = (SELECT id FROM daily_briefings WHERE group_id=b.group_id ORDER BY published_at DESC, id DESC LIMIT 1)
+              AND b.sent_as IN ('image', 'text')
+              AND b.id = (SELECT id FROM daily_briefings WHERE group_id=b.group_id
+                          AND sent_as IN ('image', 'text') ORDER BY published_at DESC, id DESC LIMIT 1)
               AND (n.id IS NULL OR n.sent_as = 'skipped_no_news'
                    OR (n.sent_as = 'retry_pending' AND json_extract(n.payload_json, '$.retry_at') <= ?))
             LIMIT 1
@@ -197,7 +200,9 @@ class DigestRepository:
             LEFT JOIN news_broadcasts AS n ON n.briefing_id = b.id
             WHERE b.group_id = ?
               AND b.published_at >= ?
-              AND b.id = (SELECT id FROM daily_briefings WHERE group_id=b.group_id ORDER BY published_at DESC, id DESC LIMIT 1)
+              AND b.sent_as IN ('image', 'text')
+              AND b.id = (SELECT id FROM daily_briefings WHERE group_id=b.group_id
+                          AND sent_as IN ('image', 'text') ORDER BY published_at DESC, id DESC LIMIT 1)
               AND (n.id IS NULL OR n.sent_as = 'skipped_no_news'
                    OR (n.sent_as = 'retry_pending' AND json_extract(n.payload_json, '$.retry_at') <= ?))
             ORDER BY b.published_at DESC
@@ -232,7 +237,7 @@ class DigestRepository:
         db = await self._get_db()
         async with db.execute(
             "SELECT card_json FROM daily_briefings WHERE group_id=? AND published_at>=? "
-            "AND published_at<=? ORDER BY published_at DESC LIMIT 7",
+            "AND published_at<=? AND sent_as IN ('image', 'text') ORDER BY published_at DESC LIMIT 7",
             (int(group_id), since.isoformat(), before.isoformat()),
         ) as cursor:
             rows = await cursor.fetchall()
@@ -267,6 +272,7 @@ class DigestRepository:
             FROM daily_briefings
             WHERE group_id = ?
               AND published_at >= ?
+              AND sent_as IN ('image', 'text')
             ORDER BY published_at DESC
             LIMIT 1
             """,

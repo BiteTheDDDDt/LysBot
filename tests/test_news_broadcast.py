@@ -284,6 +284,32 @@ class NewsBroadcastAsyncTests(unittest.IsolatedAsyncioTestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
+    async def test_unconfirmed_snapshot_is_not_published_or_used_for_news(self):
+        manager = object.__new__(MemoryManager)
+        manager._init()
+        manager._db_path = Path(self.outbox_temp.name) / "briefings.db"
+        self.addAsyncCleanup(manager.close)
+        before = datetime(2026, 8, 27)
+        since = datetime(2026, 8, 25)
+        await manager.save_published_briefing(
+            456, {"topics": ["Unconfirmed"]}, sent_as="image_unconfirmed",
+            published_at=datetime(2026, 8, 26, 23, 30),
+        )
+        self.assertFalse(await manager.has_published_briefing_for_date(456, "2026-08-26"))
+        self.assertFalse(await manager.has_pending_briefing_for_news(published_after=since))
+        self.assertIsNone(await manager.get_pending_briefing_for_news(456, published_after=since))
+        self.assertIsNone(await manager.get_latest_published_briefing(456, published_after=since))
+        self.assertEqual(await manager.recent_news_topics(456, since=since, before=before), [])
+
+        await manager.save_published_briefing(
+            456, {"topics": ["Confirmed"]}, sent_as="text",
+            published_at=datetime(2026, 8, 25, 23, 30),
+        )
+        self.assertTrue(await manager.has_pending_briefing_for_news(published_after=since))
+        for lookup in (manager.get_pending_briefing_for_news, manager.get_latest_published_briefing):
+            self.assertEqual((await lookup(456, published_after=since))["briefing_date"], "2026-08-25")
+        self.assertEqual(await manager.recent_news_topics(456, since=since, before=before), ["Confirmed"])
+
     async def test_sent_briefing_is_consumed_only_once_across_persistent_store(self):
         manager = object.__new__(MemoryManager)
         manager._init()
