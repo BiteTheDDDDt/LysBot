@@ -104,6 +104,8 @@ async def exercise(root, directory, model_port, requests):
                         data = {}
                         if name == "get_login_info":
                             data = {"user_id": 999, "nickname": "磷叶石"}
+                        elif name == "get_status":
+                            data = {"online": True, "good": True}
                         elif name == "get_group_list":
                             data = [{"group_id": 7, "group_name": "测试群"}]
                         elif name == "get_group_member_info":

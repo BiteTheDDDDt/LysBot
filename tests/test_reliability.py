@@ -22,11 +22,24 @@ from src.plugins.llm_chat.turns import send_response_turn
 from src.plugins.llm_chat.reply_policy import DETAILED_REPLY
 from src.plugins.llm_chat.news_sources import extract_publication_date
 from src.plugins.llm_chat import news_broadcast
+from src.plugins.llm_chat import health
 from scripts.healthcheck import check
 from scripts.database_maintenance import reindex_copy, snapshot
 
 
 class MemoryReliabilityTests(unittest.IsolatedAsyncioTestCase):
+    async def test_online_probe_distinguishes_offline_and_unavailable(self):
+        bot = AsyncMock()
+        with patch.object(health, "get_bots", return_value={"123": bot}):
+            bot.get_status.return_value = {"online": False, "good": True}
+            self.assertIs(await health.check_onebot_online(), False)
+            bot.get_status.return_value = {"online": True}
+            self.assertIs(await health.check_onebot_online(), True)
+            bot.get_status.return_value = {"online": "true"}
+            self.assertIsNone(await health.check_onebot_online())
+            bot.get_status.side_effect = TimeoutError()
+            self.assertIsNone(await health.check_onebot_online())
+
     async def asyncSetUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.manager = object.__new__(MemoryManager)
@@ -516,6 +529,15 @@ class OperationalTests(unittest.TestCase):
             state.update(database_ok=True,onebot_connected=False)
             (root/"health.json").write_text(json.dumps(state))
             self.assertEqual(check(root,now=101), (False,"OneBot disconnected"))
+            state.update(onebot_connected=True)
+            for qq_online, expected in (
+                (False, (False, "QQ offline")),
+                (None, (False, "QQ status unavailable")),
+                (True, (True, "ready")),
+            ):
+                state["qq_online"] = qq_online
+                (root / "health.json").write_text(json.dumps(state))
+                self.assertEqual(check(root, now=101), expected)
 
     def test_maintenance_only_repairs_a_new_copy(self):
         with tempfile.TemporaryDirectory() as directory:

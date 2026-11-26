@@ -58,7 +58,7 @@ docker compose run --rm --no-deps bot python scripts/napcat.py connect
 | --- | --- |
 | `doctor.py` | 只读配置、工件与可选运行状态，不调用模型 |
 | `napcat.py` | 查询登录、保存私有二维码、配置本项目的反向 WebSocket |
-| `healthcheck.py` | Compose 自动调用，检查进程心跳、数据库和 OneBot 状态；不需要人定期执行 |
+| `healthcheck.py` | Compose 自动调用，检查进程心跳、数据库、OneBot 连接和 OneBot `get_status` 返回的 QQ 在线状态；掉线或查不到状态时报告未就绪 |
 | `prepare_local_embedding.py` | setup 服务调用，下载并校验固定 BGE 权重；已有有效文件时复用 |
 | `database_maintenance.py` | SQLite 完整性检查、一致性备份、在新副本上重建普通索引；不替换运行数据库 |
 | `agentic_search_ops.py` | 查询全文/向量索引进度；索引补建、失败任务重试和副本索引导入会写数据，按需执行 |

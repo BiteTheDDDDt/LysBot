@@ -101,6 +101,9 @@ def diagnose(root, environment=None, *, runtime=False):
             for key in ("plugin_ready", "database_ok", "onebot_connected"):
                 ready = fresh and state.get(key) is True
                 check(key, "ok" if ready else "error", "ready" if ready else "not_ready")
+            online = state.get("qq_online") if fresh and state.get("onebot_connected") is True else None
+            check("qq_online", "ok" if online is True else "error",
+                  "ready" if online is True else "qq_offline" if online is False else "qq_status_unavailable")
         except (OSError, ValueError, KeyError, TypeError):
             check("runtime", "error", "heartbeat_unavailable", "Start bot, then check runtime status")
     return {"schema_version": 1, "ok": not any(item["status"] == "error" for item in checks),

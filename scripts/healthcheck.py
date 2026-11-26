@@ -19,6 +19,8 @@ def check(data_dir: Path, *, now=None, require_onebot=True) -> tuple[bool, str]:
             return False, "database unhealthy"
         if require_onebot and not state.get("onebot_connected"):
             return False, "OneBot disconnected"
+        if require_onebot and state.get("qq_online") is not True:
+            return False, "QQ offline" if state.get("qq_online") is False else "QQ status unavailable"
         return True, "ready"
     except (OSError, ValueError, KeyError, TypeError):
         return False, "plugin heartbeat unavailable"

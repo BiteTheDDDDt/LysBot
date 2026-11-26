@@ -1,4 +1,4 @@
-"""Runtime readiness with database integrity and OneBot connection state."""
+"""Runtime readiness with database integrity and QQ connection state."""
 import asyncio
 import json
 import os
@@ -20,13 +20,33 @@ def check_database() -> bool:
         return db.execute("PRAGMA quick_check(1)").fetchall() == [("ok",)]
 
 
-def write_health(database_ok: bool, error: str = "") -> None:
+async def check_onebot_online() -> bool | None:
+    async def read_status(bot) -> bool | None:
+        try:
+            async with asyncio.timeout(3):
+                status = await bot.get_status()
+            online = status.get("online") if isinstance(status, dict) else None
+            return online if isinstance(online, bool) else None
+        except Exception:
+            return None
+
+    bots = tuple(get_bots().values())
+    if not bots:
+        return None
+    states = await asyncio.gather(*(read_status(bot) for bot in bots))
+    if True in states:
+        return True
+    return None if None in states else False
+
+
+def write_health(database_ok: bool, error: str = "", *, qq_online: bool | None = None) -> None:
     from .conversation import task_snapshot
     path = data_path("health.json")
     temporary = path.with_suffix(".tmp")
     temporary.write_text(json.dumps({
         "pid": os.getpid(), "updated_at": time.time(), "plugin_ready": True,
         "database_ok": database_ok, "onebot_connected": bool(get_bots()),
+        "qq_online": qq_online,
         "error": error,
         "work": task_snapshot(),
     }), encoding="utf-8")
@@ -47,7 +67,7 @@ async def _monitor() -> None:
                 if not ok:
                     logger.error(f"[health] {error}")
                 next_check = time.monotonic() + 60
-            write_health(ok, error)
+            write_health(ok, error, qq_online=await check_onebot_online())
             await asyncio.sleep(10)
     finally:
         data_path("health.json").unlink(missing_ok=True)
