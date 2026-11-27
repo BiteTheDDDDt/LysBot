@@ -157,13 +157,13 @@ path=next((root/'pending').glob('*.json'))
 payload=json.loads(path.read_text());payload['recipient']='99999';path.write_text(json.dumps(payload))
 bot=SimpleNamespace(send_private_msg=AsyncMock(return_value={'message_id':42}))
 async def run():
- with patch.object(worker,'get_bots',return_value={'10002':bot}):
+ with patch('src.onebot_accounts.get_bots',return_value={'10002':bot}):
   await worker.deliver_pending();await worker.deliver_pending()
  bot.send_private_msg.assert_awaited_once()
  assert bot.send_private_msg.call_args.kwargs['user_id']==10001
  enqueue(root,'later','Another report')
  for bots in [{},{'10002':bot,'10003':bot}]:
-  with patch.object(worker,'get_bots',return_value=bots):await worker.deliver_pending()
+  with patch('src.onebot_accounts.get_bots',return_value=bots):await worker.deliver_pending()
  assert bot.send_private_msg.await_count==1
  assert len(list((root/'receipts').glob('*.json')))==1
  print('PLUGIN_INTEGRATION_OK')

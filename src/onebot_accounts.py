@@ -3,12 +3,16 @@
 import json
 import os
 import time
+from contextvars import ContextVar
 from pathlib import Path
 
 from nonebot import get_bots, logger
 from nonebot.adapters.onebot.v11 import Adapter, Bot, Event
 from nonebot.exception import IgnoredException
 from nonebot.message import event_preprocessor
+
+
+_sending_account_alert = ContextVar("sending_account_alert", default=False)
 
 
 class Accounts:
@@ -22,6 +26,7 @@ class Accounts:
         self.blocked = set()
         self.cutover = 0
         self.pending = []
+        self.online = {}
         self.down_since = None
         self.next_refresh = 0
         self.awaiting_preferred = False
@@ -79,6 +84,7 @@ class Accounts:
         )
 
     async def observe(self, bots, states, now):
+        self.online = states.copy()
         if not self.groups and not self.cutover and not self.blocked:
             if states.get(self.primary) is not True and states.get(self.standby) is True:
                 groups = await memberships(bots[self.standby])
@@ -133,10 +139,13 @@ class Accounts:
             if sender is not None:
                 message = self.pending.pop(0)
                 self.save()
+                token = _sending_account_alert.set(True)
                 try:
                     await sender.send_private_msg(user_id=int(os.environ["MASTER_QQ"]), message=message, _timeout=5)
                 except Exception as exc:
                     logger.warning(f"主备提醒投递未确认: {type(exc).__name__}")
+                finally:
+                    _sending_account_alert.reset(token)
 
 
 async def memberships(bot):
@@ -157,7 +166,7 @@ accounts = Accounts(
 
 def active_bots():
     bots = get_bots()
-    return {k: v for k, v in bots.items() if accounts.owns(k)} if accounts.enabled else bots
+    return {k: v for k, v in bots.items() if accounts.owns(k) and accounts.online.get(k) is True} if accounts.enabled else bots
 
 
 @event_preprocessor
@@ -167,17 +176,18 @@ async def account_events(bot: Bot, event: Event):
     if getattr(event, "notice_type", None) == "bot_offline":
         accounts.forced_offline(bot.self_id)
     group = getattr(event, "group_id", None)
-    if group is not None and (
+    if event.post_type != "meta_event" and (
         not accounts.owns(bot.self_id, group)
         or getattr(event, "user_id", None) in (int(accounts.primary), int(accounts.standby))
         or event.time <= accounts.cutover
     ):
-        raise IgnoredException("group event outside account ownership")
+        raise IgnoredException("event outside service account ownership")
 
 
 class AccountAdapter(Adapter):
     async def _call_api(self, bot, api, **data):
         group = data.get("group_id")
-        if group is not None and not api.startswith(("get_", "can_")) and not accounts.owns(bot.self_id, group):
-            raise RuntimeError("group action outside account ownership")
+        alert = api == "send_private_msg" and _sending_account_alert.get()
+        if not alert and not api.startswith(("get_", "can_")) and not accounts.owns(bot.self_id, group):
+            raise RuntimeError("action outside service account ownership")
         return await super()._call_api(bot, api, **data)

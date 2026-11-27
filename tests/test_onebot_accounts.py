@@ -61,6 +61,22 @@ class AccountTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(RuntimeError):
                 await AccountAdapter._call_api(None, Mock(self_id="11"), "send_group_msg", group_id=2)
 
+    async def test_switch_moves_private_messages_and_plugin_sender_together(self):
+        from lysbot import get_service_bot
+        event = Mock(group_id=None, user_id=33, time=200, post_type="message")
+        with patch("src.onebot_accounts.accounts", self.accounts), patch("src.onebot_accounts.get_bots", return_value=self.bots):
+            for active, other in (("11", "22"), ("22", "11")):
+                self.accounts.active = active
+                self.accounts.online = {active: True, other: True}
+                self.assertIs(get_service_bot(), self.bots[active])
+                await account_events(Mock(self_id=active), event)
+                with self.assertRaises(IgnoredException):
+                    await account_events(Mock(self_id=other), event)
+                with self.assertRaises(RuntimeError):
+                    await AccountAdapter._call_api(None, Mock(self_id=other), "send_private_msg", user_id=33)
+                self.accounts.online[active] = False
+                self.assertIsNone(get_service_bot())
+
     async def test_first_online_account_serves_until_preferred_is_ready(self):
         with patch.dict("os.environ", MASTER_QQ="33"):
             await self.accounts.observe({"22": self.spare}, {"22": True}, 1)

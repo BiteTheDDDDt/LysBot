@@ -31,8 +31,8 @@ register_tool(
 投资通知这类功能不需要经过模型。使用 NoneBot 的事件、scheduler 或本地队列处理任务，通过统一接口通知 master：
 
 ```python
-from nonebot import get_bots, require
-from lysbot import notify_master
+from nonebot import require
+from lysbot import get_service_bot, notify_master
 
 require("nonebot_plugin_apscheduler")
 from nonebot_plugin_apscheduler import scheduler
@@ -42,7 +42,7 @@ async def check_jobs():
     # 从自己的持久化任务队列取得一个待发送结果。
     result = None
     if result:
-        bot = next(iter(get_bots().values()), None)
+        bot = get_service_bot()
         if bot:
             status, receipt = await notify_master(bot, result)
             # sent 表示收到 QQ 发送回执；unconfirmed 不应盲目重发。

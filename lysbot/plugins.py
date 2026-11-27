@@ -23,6 +23,13 @@ class ToolContext:
         return is_master(self.requester_id)
 
 
+def get_service_bot():
+    """Return the current sender, or None while no unique service account is ready."""
+    from src.onebot_accounts import active_bots
+    bots = active_bots()
+    return next(iter(bots.values())) if len(bots) == 1 else None
+
+
 async def notify_master(bot, text):
     """Send a private notification to the configured owner. No model call."""
     from src.plugins.llm_chat.delivery import deliver_once
