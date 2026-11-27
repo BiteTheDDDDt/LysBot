@@ -393,7 +393,7 @@ async def pick_meme(topic: str, reason: str = "") -> Optional[Dict[str, Any]]:
         return None
 
     try:
-        picked = await meme_manager.pick_random(topic, group_id=group_id)
+        picked = await meme_manager.pick_random(topic)
     except Exception:
         ctx["pick_status"] = "selection_error"
         raise
@@ -471,7 +471,7 @@ async def send_picked_meme(planned: Optional[Dict[str, Any]], allow_reply: bool 
     }
     _meme_context.set(ctx)
     try:
-        await meme_manager.mark_used(meme_id, group_id=group_id)
+        await meme_manager.mark_used(meme_id)
     except asyncio.CancelledError:
         raise
     except Exception as error:

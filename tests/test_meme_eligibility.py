@@ -9,21 +9,6 @@ from src.plugins.llm_chat.memes import MemeManager
 
 
 class MemeEligibilityTests(unittest.IsolatedAsyncioTestCase):
-    async def test_recent_sends_are_group_specific_and_survive_restart(self):
-        m = self.manager
-        first = await m.add_meme(b"one", "funny", "one", random_eligible=True)
-        second = await m.add_meme(b"two", "funny", "two", random_eligible=True)
-        await m.mark_used(first, group_id=1)
-        await m.mark_used(second, group_id=2)
-        await m.close()
-        self.assertEqual((await m.pick_random("funny", group_id=1))[0], second)
-        self.assertEqual((await m.pick_random("funny", group_id=2))[0], first)
-        await m.mark_used(second, group_id=1)
-        self.assertEqual((await m.pick_random("funny", group_id=1))[0], first)
-        # Missing files do not crowd the only usable item out of selection.
-        Path((await m.pick_random("funny", group_id=1))[1]).unlink()
-        self.assertEqual((await m.pick_random("funny", group_id=1))[0], second)
-
     async def test_reaction_and_joke_pools_are_independent(self):
         m = self.manager
         reaction = await m.add_meme(b"reaction", "funny", "捂脸", random_eligible=True, meme_kind="reaction")

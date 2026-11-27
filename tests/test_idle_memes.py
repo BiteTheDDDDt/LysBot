@@ -46,7 +46,7 @@ class IdleMemeTests(unittest.IsolatedAsyncioTestCase):
     async def test_successful_idle_send_is_persistent_and_not_repeated_without_humans(self):
         self.assertTrue(await idle.share_idle_meme(self.bot, 98765))
         self.assertFalse(await idle.share_idle_meme(self.bot, 98765))
-        self.pick.assert_awaited_once_with(None, meme_kind='joke', group_id=98765)
+        self.pick.assert_awaited_once_with(None, meme_kind='joke')
         self.assertFalse(self.send.await_args.kwargs['allow_reply'])
         self.remember.assert_awaited_once()
         self.assertEqual((await (await self.db.execute('SELECT human_at FROM idle_meme_state')).fetchone())[0], self.old)

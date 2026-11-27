@@ -65,7 +65,7 @@ async def share_idle_meme(bot, group_id):
         if decision.action == "silent":
             await _record_idle_state(db, group_id, human, last_delivery)
         return False
-    picked = await meme_manager.pick_random(decision.meme_topic or None, meme_kind="joke", group_id=group_id)
+    picked = await meme_manager.pick_random(decision.meme_topic or None, meme_kind="joke")
     if not picked:
         return False
     meme_id, path, description = picked
