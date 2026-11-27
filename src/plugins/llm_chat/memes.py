@@ -132,6 +132,7 @@ class MemeManager:
             if self._db is not None and self._db_initialized:
                 return self._db
             self._db = await aiosqlite.connect(self._db_path)
+            await self._db.execute("PRAGMA foreign_keys=ON")
             await self._db.execute("""
                 CREATE TABLE IF NOT EXISTS memes (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -167,6 +168,15 @@ class MemeManager:
         for name, sql_type in (("meme_kind", "TEXT"), ("classification_reason", "TEXT"), ("text_sentence_count", "INTEGER")):
             if name not in columns:
                 await self._db.execute(f"ALTER TABLE memes ADD COLUMN {name} {sql_type}")
+
+        await self._db.execute("""
+            CREATE TABLE IF NOT EXISTS meme_group_use (
+                meme_id INTEGER NOT NULL REFERENCES memes(id) ON DELETE CASCADE,
+                group_id INTEGER NOT NULL,
+                sent_at REAL NOT NULL,
+                PRIMARY KEY (meme_id, group_id)
+            )
+        """)
 
         async with self._db.execute(
             "SELECT id, description FROM memes WHERE memory_description IS NULL OR trim(memory_description) = ''"
@@ -325,37 +335,52 @@ class MemeManager:
         return result
 
     # -------- 检索 --------
-    async def pick_random(self, topic: Optional[str], *, meme_kind: str = "reaction") -> Optional[Tuple[int, str, str]]:
-        """在指定 topic 的合格图片中等概率随机抽取，不按使用次数或时间加权。"""
+    async def pick_random(self, topic: Optional[str], *, meme_kind: str = "reaction",
+                          group_id: Optional[int] = None) -> Optional[Tuple[int, str, str]]:
+        """等概率抽取，避开本群最近发过的图，最多排除当前可用池的一半。"""
         if (topic is not None and topic not in ALLOWED_TOPICS) or meme_kind not in {"reaction", "joke"}:
             return None
         db = await self._get_db()
         async with db.execute(
-            """SELECT id, file_path, COALESCE(NULLIF(memory_description, ''), description), description, random_eligible, hash
-               FROM memes
-               WHERE (? IS NULL OR topic = ?) AND random_eligible=1 AND meme_kind=?
+            """SELECT m.id, m.file_path, COALESCE(NULLIF(m.memory_description, ''), m.description),
+                      m.hash, u.sent_at
+               FROM memes m LEFT JOIN meme_group_use u ON u.meme_id=m.id AND u.group_id=?
+               WHERE (? IS NULL OR m.topic=?) AND m.random_eligible=1 AND m.meme_kind=?
                ORDER BY RANDOM()""",
-            (topic, topic, meme_kind),
+            (group_id, topic, topic, meme_kind),
         ) as cur:
             rows = await cur.fetchall()
-            for row in rows:
-                path = Path(row[1])
-                if not path.is_file():
-                    # Resolve old host paths by content hash after a move to Docker.
-                    matches = list((self._files_dir / row[5][:2]).glob(row[5] + ".*"))
-                    if len(matches) != 1 or not matches[0].is_file():
-                        continue
-                    path = matches[0]
-                return (row[0], str(path), row[2])
-            return None
+        candidates = []
+        recent = []
+        for meme_id, stored_path, description, digest, sent_at in rows:
+            path = Path(stored_path)
+            if not path.is_file():
+                # Resolve old host paths by content hash after a move to Docker.
+                matches = list((self._files_dir / digest[:2]).glob(digest + ".*"))
+                if len(matches) != 1 or not matches[0].is_file():
+                    continue
+                path = matches[0]
+            candidates.append((meme_id, str(path), description))
+            if sent_at is not None:
+                recent.append((sent_at, meme_id))
+        recent.sort(reverse=True)
+        excluded = {meme_id for _, meme_id in recent[:len(candidates) // 2]}
+        return next((item for item in candidates if item[0] not in excluded), None)
 
-    async def mark_used(self, meme_id: int):
+    async def mark_used(self, meme_id: int, *, group_id: Optional[int] = None):
         from datetime import datetime
         db = await self._get_db()
         await db.execute(
             "UPDATE memes SET used_count = used_count + 1, last_used_at = ? WHERE id = ?",
             (datetime.now().isoformat(), meme_id),
         )
+        if group_id:
+            await db.execute(
+                """INSERT INTO meme_group_use(meme_id, group_id, sent_at)
+                   SELECT id, ?, ? FROM memes WHERE id=?
+                   ON CONFLICT(meme_id, group_id) DO UPDATE SET sent_at=excluded.sent_at""",
+                (group_id, time.time(), meme_id),
+            )
         await db.commit()
 
     # -------- 冷却 --------
