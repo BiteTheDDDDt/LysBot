@@ -11,7 +11,8 @@ from typing import Optional
 from urllib.parse import urlparse
 
 import httpx
-from nonebot import get_bots, logger, require
+from src.onebot_accounts import active_bots as get_bots
+from nonebot import logger, require
 from PIL import Image
 
 require("nonebot_plugin_apscheduler")

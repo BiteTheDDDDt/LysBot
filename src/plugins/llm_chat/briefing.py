@@ -10,7 +10,8 @@ from io import BytesIO
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
 
-from nonebot import logger, get_bots
+from src.onebot_accounts import active_bots as get_bots
+from nonebot import logger
 from nonebot import require
 from PIL import Image, ImageOps
 

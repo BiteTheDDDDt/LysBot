@@ -2,7 +2,8 @@
 import time
 from datetime import datetime
 
-from nonebot import get_bots, logger, require
+from src.onebot_accounts import active_bots as get_bots
+from nonebot import logger, require
 
 from .config import config
 from .conversation import serialized_turn, tracked_job

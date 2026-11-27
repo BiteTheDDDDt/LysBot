@@ -8,6 +8,7 @@ from contextlib import closing
 
 from nonebot import get_bots, logger
 
+from src.onebot_accounts import accounts
 from .paths import data_path
 
 _task = None
@@ -26,14 +27,20 @@ async def check_onebot_online() -> bool | None:
             async with asyncio.timeout(3):
                 status = await bot.get_status()
             online = status.get("online") if isinstance(status, dict) else None
+            if accounts.enabled and status.get("good") is False:
+                return False
             return online if isinstance(online, bool) else None
         except Exception:
             return None
 
-    bots = tuple(get_bots().values())
+    bots = dict(get_bots())
+    if accounts.enabled:
+        states = dict(zip(bots, await asyncio.gather(*(read_status(bot) for bot in bots.values()))))
+        await accounts.observe(bots, states, time.monotonic())
+        return states.get(accounts.active) if accounts.owns(accounts.active) else False
     if not bots:
         return None
-    states = await asyncio.gather(*(read_status(bot) for bot in bots))
+    states = await asyncio.gather(*(read_status(bot) for bot in bots.values()))
     if True in states:
         return True
     return None if None in states else False
@@ -47,6 +54,7 @@ def write_health(database_ok: bool, error: str = "", *, qq_online: bool | None =
         "pid": os.getpid(), "updated_at": time.time(), "plugin_ready": True,
         "database_ok": database_ok, "onebot_connected": bool(get_bots()),
         "qq_online": qq_online,
+        **({"active_qq": accounts.active, "blocked_qq": sorted(accounts.blocked), "standby_connected": accounts.standby in get_bots()} if accounts.enabled else {}),
         "error": error,
         "work": task_snapshot(),
     }), encoding="utf-8")
