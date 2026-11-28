@@ -18,7 +18,7 @@
 - `MODEL_SEARCH`、`MODEL_VISION`、`MODEL_TTS`、`MODEL_IMAGE_GEN` 未填即无对应能力；专用模型只使用各自的候选链。
 - 搜索实现支持 DashScope 原生搜索及已适配的 GPT Responses 原生搜索；当前不是任意模型都能开启联网。
 - 识图仍有协议能力白名单，见 `providers.py`；语音当前使用 Google 原生 TTS，生图使用 OpenAI/CLIProxyAPI Images API。
-- 找已有图片时，planner 可搜索 Wikimedia Commons，按标题挑选图片，在群聊或私聊发送图片和署名、来源。此能力无需额外 API Key，也可在未配置生图模型时使用。
+- 找已有图片时，planner 使用 MODEL_SEARCH 的原生 web search 找公开图片，选定后下载并校验，再向群聊或私聊发送图片和来源。未配置搜索模型或搜索没有返回图片候选时使用 Wikimedia Commons。无需配置生图模型。
 
 显式配置了错误 provider、协议不支持的型号或无可用凭据时，启动会报告配置错误。未配置的能力从工具目录移除，后台入口和执行入口也不发起对应模型调用。
 

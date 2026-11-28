@@ -111,7 +111,7 @@ def register_user_links(run, text):
             pass
 
 
-async def search(query: str, *, domains=None, freshness_days=None, limit=8, image_refs=None):
+async def search(query: str, *, domains=None, freshness_days=None, limit=8, image_refs=None, find_images=False):
     from .agent_runner import current_run
     from .config import config
     from .native_search import native_search
@@ -179,6 +179,14 @@ async def search(query: str, *, domains=None, freshness_days=None, limit=8, imag
                     "today": datetime.now(timezone(timedelta(hours=8))).date().isoformat(),
                 }
             )
+            if find_images:
+                prompt += (
+                    "\n这是搜现有图片的请求。在公开网站搜索匹配的照片或图片，优先原始发布者。"
+                    "返回 JSON 对象，images 数组最多三项，字段 title 和 image_url。image_url 是搜索实际找到的、"
+                    "可下载图像文件的完整直链，保留查询参数。遇到图片详情页，用原生联网工具跟进原图或下载链接；"
+                    "图片下载端点可以没有文件扩展名，客户端会实际验证图片。不要推测文件路径。"
+                    "没有找到用空数组。引用来源放在 JSON 后面。"
+                )
             if image_refs:
                 prompt += "\n附图是用户所问原图，文字外观描述及候选名字可能有误。结合原图辨认、联网核对候选与来源；区分视觉猜测与来源支持的结论。未取得同图匹配证据时，不要声称执行了反向搜图或找到了原图。"
             payload = await asyncio.wait_for(

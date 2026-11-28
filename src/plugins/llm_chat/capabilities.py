@@ -28,7 +28,7 @@ class Capability:
         return ExecutionPolicy(
             self.name, permission="current" if self.read_only else "send",
             timeout=lambda: float(config.chat_media_turn_timeout if self.media else
-                                  retry_budget(config.agent_tool_timeout) if self.name == "search_web" else config.agent_tool_timeout),
+                                  retry_budget(config.agent_tool_timeout) if self.name in {"search_web", "search_web_images"} else config.agent_tool_timeout),
             check_result=self.read_only,
         )
 
@@ -403,7 +403,7 @@ CAPABILITIES = {
         Capability(POKE_TOOL),
         Capability(VOICE_TOOL, media=True),
         Capability(IMAGE_GENERATION_TOOL, media=True),
-        Capability(_image_lookup_tool("search_web_images", "搜索 Wikimedia Commons 现有图片，返回候选标题和 ID。只填写公开对象和画面特征。", "query"), read_only=True),
+        Capability(_image_lookup_tool("search_web_images", "用配置的联网搜索模型查找公开网站上的现有图片，返回候选标题和 ID。只填写公开对象和画面特征。", "query"), read_only=True),
         Capability(_image_lookup_tool("send_web_image", "发送本轮搜图候选中选定的一张原有图片；没有匹配时 image_id 留空。", "image_id"), media=True),
         Capability(RECALL_HISTORY_TOOL, read_only=True, memory_scoped=True),
         Capability(GROUP_FACTS_TOOL, read_only=True),

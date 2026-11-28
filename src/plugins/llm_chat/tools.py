@@ -611,7 +611,11 @@ async def send_web_image(image_id: str) -> str:
         data = await download_preview(image)
     except (OSError, ValueError, httpx.HTTPError) as error:
         logger.warning("[send_web_image] download failed: %s", type(error).__name__)
-        return MediaInputUnavailable("找到了图片，但这次没能下载下来")
+        remaining = ctx["web_images"]
+        remaining.pop(image_id, None)
+        if remaining:
+            return MediaValidationFailure("选中图片无法下载或解码，可从本轮其他匹配候选中重选：" + "、".join(remaining))
+        return MediaInputUnavailable("找到了图片链接，但没能取得可发送的图片")
     status, receipt = await deliver_media(ctx["bot"], group_id=ctx["group_id"], user_id=ctx["user_id"],
         media_type="image", data=data, addressing=ctx["addressing"],
         caption=" · ".join(filter(None, [image.title, image.credit, image.source])))
