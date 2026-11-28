@@ -600,6 +600,15 @@ class MediaValidationRetryTests(unittest.IsolatedAsyncioTestCase):
             calls.append(make_tool_call("image-2", "generate_image", {"prompt": prompt}))
         return make_response(FakeToolMessage(calls))
 
+    async def test_unavailable_original_asks_for_resend_without_another_planner_round(self):
+        tools.set_image_context(group_id=None, user_id=42, bot=object(), missing_reference_images=True)
+        call = make_tool_call("edit", "generate_image", {"prompt": "换背景", "reference_image_ids": ["img_expired"]})
+        result, requests = await self.run_media(
+            [make_response(FakeToolMessage([call]))], AsyncMock(wraps=tools.execute_tool),
+        )
+        self.assertEqual(len(requests), 1)
+        self.assertIn("重发", str(result))
+
     async def test_long_prompt_is_corrected_once_with_real_tool_then_sent(self):
         tools.set_image_context(group_id=None, user_id=42, bot=object())
         real_execute = tools.execute_tool

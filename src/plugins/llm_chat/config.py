@@ -224,7 +224,7 @@ VOICE_TOOL_USAGE_PROMPT = """
 
 IMAGE_TOOL_USAGE_PROMPT = """
 - 本轮用图片完成请求，请调用 `generate_image`。根据请求确定主体、动作、场景和构图，描绘当前角色时使用人设外貌。
-- 本次生图请求提到“之前”“上次”“按我的偏好”“照刚才的风格”等历史信息时，先检查当前上下文；相关细节不在上下文时，先用合适的历史检索工具补齐，读取结果后再调用 `generate_image`。不要在同一批 tool_calls 里同时发起 recall 和图片生成。
+- 用户要画的内容依赖已有事实时，先弄清决定画面辨识度的细节。群里的经历和偏好查会话记录。读到依据后，把相关特征写进生图描述；用户交给你创作的部分可自由发挥。
 """
 
 MEDIA_NO_TEXT_USAGE_PROMPT = """
@@ -270,6 +270,8 @@ def get_tool_usage_prompt(
         media_prompt = VOICE_TOOL_USAGE_PROMPT
     elif required_tool == "generate_image":
         media_prompt = IMAGE_TOOL_USAGE_PROMPT
+        if role_available("search"):
+            media_prompt += "- 画面依赖陌生的公开人物、作品或网络梗，而现有材料只提到名字时，先用 search_web 查明指代和相关特征，再据此构图。\n"
     else:
         return base
 

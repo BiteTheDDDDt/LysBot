@@ -1,4 +1,6 @@
 import unittest
+
+import httpx
 from unittest.mock import AsyncMock, patch
 
 import nonebot
@@ -30,6 +32,8 @@ class _FakeStream:
         self.response = response
 
     async def __aenter__(self):
+        if isinstance(self.response, Exception):
+            raise self.response
         return self.response
 
     async def __aexit__(self, *exc):
@@ -93,6 +97,15 @@ class PublicAddressTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(requested_url, "https://93.184.216.34/a.png")
         self.assertEqual(headers["Host"], "example.com")
         self.assertEqual(extensions["sni_hostname"], "example.com")
+
+    async def test_connect_failure_tries_next_validated_address(self):
+        client = _FakeClient([httpx.ConnectError("unavailable"), _FakeResponse(body=b"image")])
+        addresses = ["93.184.216.34", "93.184.216.35"]
+        with patch.object(public_net, "_public_addresses", AsyncMock(return_value=addresses)):
+            data, _ = await public_net.fetch_pinned_bytes("https://example.com/a", client=client, max_bytes=64)
+        self.assertEqual(data, b"image")
+        self.assertEqual([request[0] for request in client.requests], [f"https://{ip}/a" for ip in addresses])
+        self.assertTrue(all(request[2]["sni_hostname"] == "example.com" for request in client.requests))
 
     async def test_each_redirect_hop_is_revalidated(self):
         client = _FakeClient([_FakeResponse(redirect="http://127.0.0.1/secret")])

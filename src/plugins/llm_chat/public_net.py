@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import socket
+from contextlib import AsyncExitStack
 from typing import Callable
 from urllib.parse import urlparse
 
@@ -32,7 +33,7 @@ def _check_url(url: str) -> tuple[str, str, int]:
     return parsed.scheme, host, parsed.port or 443
 
 
-async def resolve_public_address(url: str, client: httpx.AsyncClient) -> str:
+async def _public_addresses(url: str, client: httpx.AsyncClient) -> list[str]:
     """Resolve and pin a public destination, including hosts behind Fake-IP DNS."""
     _, host, port = _check_url(url)
     try:
@@ -42,11 +43,11 @@ async def resolve_public_address(url: str, client: httpx.AsyncClient) -> str:
     if literal is not None:
         if not literal.is_global:
             raise ValueError("non_public_address")
-        return str(literal)
+        return [str(literal)]
     resolved = await asyncio.to_thread(socket.getaddrinfo, host, port, type=socket.SOCK_STREAM)
     addresses = list(dict.fromkeys(ipaddress.ip_address(item[4][0]) for item in resolved))
     if addresses and all(address.is_global for address in addresses):
-        return str(sorted(addresses, key=lambda address: address.version)[0])
+        return [str(address) for address in sorted(addresses, key=lambda address: address.version)]
     if not addresses or not all(address in FAKE_IP_RANGE for address in addresses):
         raise ValueError("non_public_address")
     # Only the known Fake-IP range takes this path. Never allow that range as a
@@ -57,7 +58,11 @@ async def resolve_public_address(url: str, client: httpx.AsyncClient) -> str:
     addresses = [ipaddress.ip_address(item["data"]) for item in data.get("Answer", []) if item.get("type") == 1]
     if data.get("Status") != 0 or not addresses or not all(address.is_global for address in addresses):
         raise ValueError("no_public_dns_answer")
-    return str(addresses[0])
+    return list(dict.fromkeys(map(str, addresses)))
+
+
+async def resolve_public_address(url: str, client: httpx.AsyncClient) -> str:
+    return (await _public_addresses(url, client))[0]
 
 
 async def fetch_pinned_bytes(
@@ -77,18 +82,22 @@ async def fetch_pinned_bytes(
     for _ in range(max_redirects):
         if on_stage:
             on_stage("resolve")
-        address = await resolve_public_address(current, client)
+        addresses = (await _public_addresses(current, client))[:3]
         original = httpx.URL(current)
         request_headers = {"Host": original.netloc.decode("ascii"), "Connection": "close", **(headers or {})}
         if on_stage:
             on_stage("request")
-        async with client.stream(
-            "GET",
-            original.copy_with(host=address),
-            headers=request_headers,
-            extensions={"sni_hostname": original.host},
-            follow_redirects=False,
-        ) as response:
+        async with AsyncExitStack() as stack:
+            for index, address in enumerate(addresses):
+                try:
+                    response = await stack.enter_async_context(client.stream(
+                        "GET", original.copy_with(host=address), headers=request_headers,
+                        extensions={"sni_hostname": original.host}, follow_redirects=False,
+                    ))
+                    break
+                except (httpx.ConnectError, httpx.ConnectTimeout):
+                    if index + 1 == len(addresses):
+                        raise
             if response.is_redirect:
                 current = urljoin(current, response.headers.get("location", ""))
                 continue

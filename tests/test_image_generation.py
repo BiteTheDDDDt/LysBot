@@ -35,7 +35,7 @@ class CLIProxyAPIImageGenerationTests(unittest.IsolatedAsyncioTestCase):
             requests.append(request)
             return httpx.Response(200, content=PNG_BYTES)
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-            with patch.object(public_net, "resolve_public_address", AsyncMock(return_value="93.184.216.34")):
+            with patch.object(public_net, "_public_addresses", AsyncMock(return_value=["93.184.216.34"])):
                 result = await image_generation._download_remote_image("https://images.example/a.png", client)
         self.assertEqual(result, PNG_BYTES)
         self.assertEqual(requests[0].url.host, "93.184.216.34")

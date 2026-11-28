@@ -32,6 +32,10 @@ class MediaValidationFailure(str):
     """Invalid arguments rejected before any generation, quota or delivery attempt."""
 
 
+class MissingOriginalImage(MediaValidationFailure):
+    """The user must supply an original before this edit can run."""
+
+
 class ToolDeliveryResult(str):
     """Model-facing text with the delivery state for programmatic callers."""
 
@@ -621,6 +625,8 @@ async def generate_image(
     max_refs = max(1, int(config.incoming_images_limit))
     if reference_image_ids is None:
         if ctx.get("missing_reference_images"):
+            if not ctx.get("references"):
+                return MissingOriginalImage("没能读到原图，请重新发一下要改的图片")
             return MediaValidationFailure("参考图片下载不完整，请用户重新发送或明确选择可用原图；不能仅凭文字描述重画。")
         reference_image_ids = ctx.get("current_reference_ids", [])
         if reference_image_ids and not ctx.get("allow_auto_reference", True):
@@ -651,6 +657,8 @@ async def generate_image(
                 return MediaValidationFailure("知识库参考图不可用，请重新读取角色资料并选用有效的图片引用。")
             originals.append(original)
         else:
+            if not references:
+                return MissingOriginalImage("目前读不到所选原图，请引用或重发要改的图片")
             return MediaValidationFailure("所选原图已过期或不属于当前会话，请用户引用或重发图片；不能仅凭文字描述重画。")
 
     scope_key = f"group:{group_id}" if group_id else f"private:{user_id}"

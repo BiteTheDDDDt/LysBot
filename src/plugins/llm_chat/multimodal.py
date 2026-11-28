@@ -53,7 +53,7 @@ async def _download_image_uncached(url: str) -> Optional[bytes]:
         from .public_net import fetch_pinned_bytes
 
         limit = max(1, int(config.image_download_max_bytes))
-        async with asyncio.timeout(30), _download_semaphore, httpx.AsyncClient(timeout=15.0, trust_env=False) as client:
+        async with asyncio.timeout(30), _download_semaphore, httpx.AsyncClient(timeout=httpx.Timeout(15.0, connect=5.0), trust_env=False) as client:
             data, _ = await fetch_pinned_bytes(
                 url,
                 client=client,
