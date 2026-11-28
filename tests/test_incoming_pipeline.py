@@ -102,7 +102,7 @@ class IncomingPipelineTests(unittest.IsolatedAsyncioTestCase):
             patch.object(chat, "proactive_manager", manager),
             patch.object(proactive, "proactive_manager", manager),
             patch.object(chat.config, "enable_proactive", True),
-            patch.object(planner, "_resolve_planner_context", AsyncMock(return_value="")),
+            patch.object(planner, "memory_manager", self.manager),
             patch.object(planner.model_manager, "chat", AsyncMock(return_value='{"action":"silent"}')) as plan,
         ):
             await chat.record_group_message(self.bot, event)
