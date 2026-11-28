@@ -987,7 +987,7 @@ async def deliver_news_broadcast(
             key=news_delivery_key(briefing), payload=payload,
             text=message_text, image=image_message,
         )
-        if outcome != "already_attempted":
+        if outcome not in {"already_attempted", "rejected"}:
             await _record_news_result(
                 briefing, payload, sent_as=outcome, message_text=message_text,
             )

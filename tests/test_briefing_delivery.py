@@ -411,8 +411,8 @@ class BriefingDeliveryTests(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_explicit_image_failure_still_uses_text_fallback(self):
-        rejected = RuntimeError("image rejected")
-        rejected.info = {"retcode": 100, "message": "image rejected"}
+        rejected = RuntimeError("invalid image segment")
+        rejected.info = {"retcode": 1400, "wording": 'message segment "image" is missing required or usable fields'}
         bot = SimpleNamespace(
             send_group_msg=AsyncMock(
                 side_effect=[rejected, {"message_id": 456}]

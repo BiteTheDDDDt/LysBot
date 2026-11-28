@@ -86,9 +86,10 @@ class Accounts:
     async def observe(self, bots, states, now):
         self.online = states.copy()
         if not self.groups and not self.cutover and not self.blocked:
-            if states.get(self.primary) is not True and states.get(self.standby) is True:
+            primary_offline = self.primary not in bots or states.get(self.primary) is False
+            if primary_offline and states.get(self.standby) is True:
                 groups = await memberships(bots[self.standby])
-                if groups:
+                if groups and not self.blocked:
                     self.active = self.standby
                     self.groups = self.served = groups
                     self.awaiting_preferred = True

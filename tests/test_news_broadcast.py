@@ -523,8 +523,8 @@ class NewsBroadcastAsyncTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(record.await_args.kwargs["sent_as"], "image")
 
     async def test_delivery_falls_back_to_text_when_image_send_explicitly_fails(self):
-        rejected = RuntimeError("image rejected")
-        rejected.info = {"retcode": 100, "message": "image rejected"}
+        rejected = RuntimeError("invalid image segment")
+        rejected.info = {"retcode": 1400, "wording": 'message segment "image" is missing required or usable fields'}
         bot = SimpleNamespace(
             send_group_msg=AsyncMock(
                 side_effect=[rejected, {"message_id": 124}]

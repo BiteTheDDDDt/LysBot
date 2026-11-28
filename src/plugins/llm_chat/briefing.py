@@ -324,7 +324,7 @@ async def deliver_briefing(
         key=briefing_delivery_key(group_id, briefing_date), payload=card_data,
         text=build_briefing_text(card_data), image=image_message,
     )
-    if outcome == "already_attempted":
+    if outcome in {"already_attempted", "rejected"}:
         return outcome
     await record_briefing_memory(
         group_id,

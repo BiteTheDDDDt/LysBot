@@ -17,9 +17,9 @@ from src.plugins.llm_chat import briefing, conversation, delivery, news_broadcas
 from src.plugins.llm_chat.delivery_outbox import DeliveryOutbox
 
 
-def rejected():
-    error = RuntimeError("image rejected")
-    error.info = {"retcode": 100, "message": "image rejected"}
+def invalid_image_segment():
+    error = RuntimeError("invalid segment")
+    error.info = {"retcode": 1400, "wording": 'message segment "image" is missing required or usable fields'}
     return error
 
 
@@ -62,7 +62,7 @@ class DeliveryOutboxTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("private", str(record))
 
     async def test_fallback_text_timeout_blocks_next_run_after_restart(self):
-        self.bot.send_group_msg.side_effect = [rejected(), TimeoutError("missing text receipt")]
+        self.bot.send_group_msg.side_effect = [invalid_image_segment(), TimeoutError("missing text receipt")]
         self.assertEqual(await self.send(), "text_unconfirmed")
         self.assertEqual(self.status(), "unknown")
         self.assertEqual(await self.send(outbox=DeliveryOutbox(self.path)), "already_attempted")
@@ -82,17 +82,60 @@ class DeliveryOutboxTests(unittest.IsolatedAsyncioTestCase):
         self.bot.send_group_msg.assert_awaited_once()
         self.assertEqual(self.status(), "unknown")
 
+    async def test_general_rejection_sends_only_the_original_image(self):
+        for index, detail in enumerate((
+            {"message": "rate limit exceeded"},
+            {"wording": "permission denied"},
+            {"message": "image rejected"},
+            {"message": "unknown message segment type: image", "wording": "permission denied"},
+            {"message": "image rejected: rate limit exceeded"},
+            {},
+        )):
+            with self.subTest(detail=detail):
+                self.key = f"briefing:71:rejection-{index}"
+                error = RuntimeError("send_group_msg failed")
+                error.info = {"retcode": 100, **detail}
+                self.bot.send_group_msg.reset_mock()
+                self.bot.send_group_msg.side_effect = error
+                self.assertEqual(await self.send(), "rejected")
+                self.assertEqual(self.status(), "rejected")
+                reopened = DeliveryOutbox(self.path)
+                self.assertTrue(await reopened.blocked(self.key))
+                self.assertEqual(await self.send(outbox=reopened), "already_attempted")
+                self.bot.send_group_msg.assert_awaited_once_with(group_id=71, message="image")
+
+    async def test_image_segment_validation_failure_permits_text(self):
+        self.bot.send_group_msg.side_effect = [invalid_image_segment(), {"message_id": 43}]
+        self.assertEqual(await self.send(), "text")
+        self.assertEqual([call.kwargs["message"] for call in self.bot.send_group_msg.await_args_list], ["image", "text"])
+        self.assertEqual(self.status(), "sent")
+
     async def test_missing_message_receipt_is_unknown(self):
         self.bot.send_group_msg.return_value = {}
         self.assertEqual(await self.send(image=None), "text_unconfirmed")
         self.assertEqual(self.status(), "unknown")
 
-    async def test_explicit_text_rejection_can_retry(self):
-        self.bot.send_group_msg.side_effect = [rejected(), {"message_id": 43}]
-        with self.assertRaises(RuntimeError):
-            await self.send(image=None)
-        self.assertEqual(self.status(), "failed")
-        self.assertEqual(await self.send(image=None), "text")
+    async def test_explicit_text_rejection_blocks_the_same_digest(self):
+        error = RuntimeError("not permitted")
+        error.info = {"retcode": 100, "wording": "permission denied"}
+        self.bot.send_group_msg.side_effect = error
+        self.assertEqual(await self.send(image=None), "rejected")
+        self.assertEqual(self.status(), "rejected")
+        self.assertEqual(await self.send(outbox=DeliveryOutbox(self.path)), "already_attempted")
+        self.bot.send_group_msg.assert_awaited_once_with(group_id=71, message="text")
+
+    async def test_malformed_or_pending_response_stays_unknown(self):
+        for index, info in enumerate(({"retcode": "error"}, {"status": "async", "retcode": 1})):
+            with self.subTest(info=info):
+                self.key = f"briefing:71:unknown-{index}"
+                error = RuntimeError("uncertain acknowledgement")
+                error.info = {**info, "wording": "unknown message segment type: image"}
+                self.bot.send_group_msg.reset_mock()
+                self.bot.send_group_msg.side_effect = error
+                self.assertEqual(await self.send(), "image_unconfirmed")
+                self.assertEqual(self.status(), "unknown")
+                self.assertEqual(await self.send(outbox=DeliveryOutbox(self.path)), "already_attempted")
+                self.bot.send_group_msg.assert_awaited_once_with(group_id=71, message="image")
 
     async def test_checkpoint_failure_keeps_durable_claim(self):
         with patch.object(self.outbox, "finish", AsyncMock(side_effect=OSError("disk unavailable"))):
@@ -143,6 +186,32 @@ class DeliveryOutboxTests(unittest.IsolatedAsyncioTestCase):
                 )
                 self.assertEqual(result, expected)
         self.bot.send_group_msg.assert_awaited_once()
+
+    async def test_news_scheduler_does_not_retry_or_publish_a_rejected_broadcast(self):
+        row = {"id": 1, "group_id": 71, "card_data": {}}
+        item = {"headline": "test", "summary": "summary", "source": "test",
+                "published_at": "2026-10-17", "url": "https://example.com/test"}
+        error = RuntimeError("send_group_msg failed")
+        error.info = {"retcode": 100, "wording": "permission denied"}
+        self.bot.send_group_msg.side_effect = error
+        with (
+            patch.object(news.memory_manager, "_db_path", self.path),
+            patch.object(news.memory_manager, "get_pending_briefing_for_news", AsyncMock(return_value=row)),
+            patch.object(news.memory_manager, "recent_news_topics", AsyncMock(return_value=[])),
+            patch.object(news.memory_manager, "recent_news_urls", AsyncMock(return_value=set())),
+            patch.object(news, "generate_news_payload", AsyncMock(return_value={"items": [item]})) as generate,
+            patch.object(news, "NEWS_IMAGE_DIR", Path(self.temp.name)),
+            patch.object(news, "render_news_image", return_value=Image.new("RGB", (1, 1))),
+            patch.object(news, "_record_news_result", AsyncMock()) as publish,
+            patch.object(news, "_record_news_retry", AsyncMock()) as retry,
+            patch.object(news.asyncio, "sleep", AsyncMock()),
+        ):
+            for _ in range(2):
+                await news.run_daily_news_broadcast(self.bot, [{"group_id": 71}])
+        generate.assert_awaited_once()
+        self.bot.send_group_msg.assert_awaited_once()
+        publish.assert_not_awaited()
+        retry.assert_not_awaited()
 
     async def test_briefing_reset_during_generation_skips_only_affected_group(self):
         async def generate(*args, **kwargs):

@@ -12,9 +12,17 @@ from .qq_addressing import QQAddressing
 SEND_POLICY = ExecutionPolicy("delivery.send", permission="send",
                               timeout=lambda: max(1.0, float(config.delivery_timeout)), check_result=False)
 
+# OneBot failure codes also cover permission and rate limits. Only these image-specific
+# diagnostics from the adapters identify a rejection that changing the medium can resolve.
+IMAGE_REJECTION_DETAILS = {
+    "unknown message segment type: image",
+    'message segment "image" is missing required or usable fields',
+    'message element "image" requires a file/url source or a complete fast-upload fingerprint',
+}
+
 
 async def deliver_once(send, *, session_id=None):
-    """One network attempt. Only an explicit rejection permits a safe fallback."""
+    """Return the receipt status or propagate an explicit OneBot rejection."""
     try:
         async with execution_scope(SEND_POLICY, session_id=session_id):
             receipt = await send()
@@ -61,14 +69,20 @@ def is_ambiguous_image_send_error(error: Exception) -> bool:
 
 
 def is_definite_send_failure(error: Exception) -> bool:
-    """Only an explicit OneBot rejection proves that a fallback is safe."""
+    """Distinguish a negative OneBot response from a lost acknowledgement."""
     info = getattr(error, "info", None)
     if is_ambiguous_image_send_error(error) or not isinstance(info, dict):
         return False
     detail = " ".join(str(info.get(key) or "") for key in ("message", "wording")).lower()
     if any(marker in detail for marker in ("timeout", "timed out", "超时", "connection", "disconnect", "连接")):
         return False
-    return info.get("retcode") not in (None, 0)
+    retcode = info.get("retcode")
+    return type(retcode) is int and retcode != 0 and info.get("status", "failed") == "failed"
+
+
+def _is_image_rejection(info: dict) -> bool:
+    details = {str(info[key]).strip().lower() for key in ("message", "wording") if info.get(key)}
+    return bool(details) and details <= IMAGE_REJECTION_DETAILS
 
 
 async def deliver_digest(
@@ -103,14 +117,16 @@ async def deliver_digest(
         except asyncio.CancelledError as error:
             await finish_safely("unknown", error=error)
             raise
-        except Exception as error:
+        except Exception as error:  # noqa: BLE001 - every in-flight adapter error needs an outbox outcome
             if is_definite_send_failure(error):
-                # If this commit fails, stop: retaining sending is safer than retrying.
-                await outbox.finish(key, "failed", attempt_token=attempt_token, error_type=type(error).__name__)
-                if medium == "image":
-                    logger.warning(f"[投递] 图片明确失败，回退文本 group={group_id}: {error}")
+                if medium == "image" and _is_image_rejection(error.info):
+                    # Persist the negative response before starting a second network attempt.
+                    await outbox.finish(key, "failed", attempt_token=attempt_token, error_type=type(error).__name__)
+                    logger.warning(f"[投递] 图片消息段未通过校验，回退文本 group={group_id}")
                     continue
-                raise
+                await finish_safely("rejected", error=error)
+                logger.warning(f"[投递] OneBot 拒绝发送，停止本条任务 key={key} medium={medium}")
+                return "rejected"
             await finish_safely("unknown", error=error)
             logger.warning(f"[投递] 回执未确认，停止自动重发 key={key}: {error}")
             return f"{medium}_unconfirmed"

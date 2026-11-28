@@ -86,3 +86,26 @@ class AccountTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(restored.active, "11")
             self.assertFalse(restored.awaiting_preferred)
             self.assertFalse(restored.owns("11", 1))
+
+    async def test_startup_waits_for_connected_primary_with_unknown_status(self):
+        await self.accounts.observe(self.bots, {"11": None, "22": True}, 1)
+        self.assertEqual(self.accounts.active, "11")
+        self.assertFalse(self.accounts.owns("22", 2))
+        self.spare.get_group_list.assert_not_awaited()
+        await self.accounts.observe(self.bots, {"11": False, "22": True}, 10)
+        self.assertTrue(self.accounts.owns("22", 2))
+
+    async def test_forced_offline_during_startup_membership_lookup_prevents_takeover(self):
+        async def read_groups(**kwargs):
+            self.accounts.forced_offline("11")
+            return [{"group_id": 2}]
+
+        self.spare.get_group_list.side_effect = read_groups
+        with patch.dict("os.environ", MASTER_QQ="33"):
+            await self.accounts.observe(self.bots, {"11": False, "22": True}, 1)
+        self.spare.get_group_list.assert_awaited()
+        for accounts in (self.accounts, Accounts("11", "22", self.path)):
+            self.assertEqual(accounts.active, "11")
+            self.assertEqual(accounts.blocked, {"11"})
+            self.assertFalse(accounts.owns("11", 2))
+            self.assertFalse(accounts.owns("22", 2))

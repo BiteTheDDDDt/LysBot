@@ -59,7 +59,7 @@ class DeliveryOutbox:
 
     async def blocked(self, key: str) -> bool:
         record = await asyncio.to_thread(self._execute, "get", key)
-        return bool(record and record["status"] in {"sending", "sent", "unknown"})
+        return bool(record and record["status"] in {"sending", "sent", "unknown", "rejected"})
 
     async def claim(self, key: str, *, group_id: int, medium: str, payload: dict) -> str | None:
         digest = hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
