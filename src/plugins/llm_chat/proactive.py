@@ -336,6 +336,7 @@ class ProactiveManager:
                 current_message=message,
                 recent_context=recent_context,
                 mode="proactive",
+                unread_through=None if _deferred else source_id,
                 bot_self_id=str(bot.self_id),
                 is_direct=False,
                 default_action="silent",

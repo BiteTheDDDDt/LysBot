@@ -202,6 +202,65 @@ def _one_line(text: str) -> str:
     return " ".join(str(text or "").split()).strip()
 
 
+def _planner_history_line(message, hide_image_observations, include_observation):
+    from .image_observations import unsolicited_view
+    content = message.content
+    if hide_image_observations:
+        content = unsolicited_view(content, include_observation=include_observation and message.role == "user")
+    content = _one_line(content)
+    if not content:
+        return ""
+    # One oversized message should not crowd out the entire dialogue.
+    if len(content) > 1200:
+        content = content[:1200] + "…"
+    if message.role == "assistant":
+        model = format_model_label(message.model_spec)
+        speaker = f"Bot（{model}）" if model else "Bot"
+        line = f"{speaker}: {content}"
+    elif getattr(message, "name", None) and not content.startswith("【群员-"):
+        line = f"{message.name}: {content}"
+    else:
+        line = content
+
+    return line
+
+
+def _format_proactive_window(window, budget):
+    messages, earlier_count, slots = window
+    budget = max(200, budget)
+    earlier = messages[:slots]
+    tail = messages[slots:]
+
+    def stamped(message, recent):
+        text = _planner_history_line(message, True, recent)
+        return f"{message.timestamp[:16].replace('T', ' ')} {text}" if text else ""
+
+    old_label = f"较早对话（{earlier_count}条，供理解话题走向）"
+    tail_label = "触发前的最近对话"
+    available = budget - len(old_label) - len(tail_label) - 3
+    earlier_lines = [line for msg in earlier if (line := stamped(msg, False))]
+    tail_lines = [line for msg in tail if (line := stamped(msg, True))]
+    # Reserve space for earlier history even if the last post is a long forward.
+    tail_budget = available - min(available // 3, len("\n".join(earlier_lines)))
+
+    def fit(line, size):
+        return line if len(line) <= size else line[:size - 1] + "…"
+
+    # Short lines release space to longer ones; the per-message cap still applies.
+    def fit_lines(lines, room):
+        room -= max(0, len(lines) - 1)
+        widths = [0] * len(lines)
+        for left, index in enumerate(sorted(range(len(lines)), key=lambda i: len(lines[i]))):
+            widths[index] = min(len(lines[index]), room // (len(lines) - left))
+            room -= widths[index]
+        return "\n".join(fit(line, width) for line, width in zip(lines, widths) if width > 0)
+
+    latest = fit_lines(tail_lines, tail_budget)
+    previous = fit_lines(earlier_lines, available - len(latest))
+    return "\n".join(part for part in (old_label + "\n" + previous if previous else "",
+                                      tail_label + "\n" + latest if latest else "") if part)
+
+
 def _format_planner_history(
     messages: list[LLMMessage],
     *,
@@ -222,25 +281,9 @@ def _format_planner_history(
     newest_first: list[str] = []
     used = 0
     for offset, message in enumerate(reversed(visible)):
-        from .image_observations import unsolicited_view
-        content = message.content
-        if hide_image_observations:
-            content = unsolicited_view(content, include_observation=offset < 4 and message.role == "user")
-        content = _one_line(content)
-        if not content:
+        line = _planner_history_line(message, hide_image_observations, offset < 4)
+        if not line:
             continue
-        # One oversized message should not crowd out the entire dialogue.
-        if len(content) > 1200:
-            content = content[:1200] + "…"
-        if message.role == "assistant":
-            model = format_model_label(message.model_spec)
-            speaker = f"Bot（{model}）" if model else "Bot"
-            line = f"{speaker}: {content}"
-        elif getattr(message, "name", None) and not content.startswith("【群员-"):
-            line = f"{message.name}: {content}"
-        else:
-            line = content
-
         cost = len(line) + 1
         if newest_first and used + cost > budget:
             break
@@ -483,6 +526,7 @@ async def plan_chat_action(
     bot_self_id: str = "",
     current_targets: tuple[MessageTarget, ...] = (),
     current_source_ids: tuple[int, ...] = (),
+    unread_through: int | None = None,
     repeat_candidate: str = "",
 ) -> PlannerDecision:
     """Choose an interaction from the actions available for this trigger."""
@@ -496,12 +540,29 @@ async def plan_chat_action(
     if proactive or idle:
         default_action = "silent"
 
-    recent_context = await _resolve_planner_context(
-        session_id=session_id,
-        current_source_ids=current_source_ids,
-        fallback_context=recent_context,
-        hide_image_observations=mode == "proactive",
-    )
+    window = None
+    if unread_through is not None and proactive and not idle:
+        from .proactive import PLANNER_COOLDOWN_SECONDS
+        try:
+            window = await memory_manager.proactive_window(
+                session_id, unread_through,
+                max(1, min(100, config.planner_context_messages, max(200, config.planner_context_max_chars) // 60)),
+                PLANNER_COOLDOWN_SECONDS,
+            )
+        except Exception as exc:
+            logger.warning(f"[planner] 主动窗口读取失败 session={session_id}: {type(exc).__name__}")
+    if window is not None:
+        recent_context = _format_proactive_window(window, config.planner_context_max_chars)
+        selected, earlier_count, earlier_selected = window
+        logger.debug(f"[planner] 主动窗口 session={session_id} through={unread_through} "
+                     f"earlier={earlier_selected}/{earlier_count} tail={len(selected) - earlier_selected}")
+    else:
+        recent_context = await _resolve_planner_context(
+            session_id=session_id,
+            current_source_ids=current_source_ids,
+            fallback_context=recent_context,
+            hide_image_observations=mode == "proactive",
+        )
     context_lines = sum(1 for line in recent_context.splitlines() if line.strip())
     logger.info(
         f"[planner] input mode={mode} session={session_id} "
@@ -670,6 +731,11 @@ QQ表情: {'，'.join(faces or []) or '无'}
             f"qq_reply={decision.addressing.reply_to is not None} qq_at={decision.addressing.mention is not None} "
             f"reason={decision.reason[:80]}"
         )
+        if window is not None:
+            try:
+                await memory_manager.advance_proactive_cursor(session_id, unread_through)
+            except Exception as exc:
+                logger.warning(f"[planner] 主动窗口进度保存失败 session={session_id}: {type(exc).__name__}")
         return decision
     except Exception as e:
         logger.warning(f"[planner] 决策失败，终止本轮: {type(e).__name__}: {e}")

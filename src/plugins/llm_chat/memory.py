@@ -602,6 +602,52 @@ class MemoryManager:
             messages = messages[-max(1, int(config.max_history_messages)):]
         return messages
 
+    async def proactive_window(self, session_id: str, through: int, limit: int, initial_seconds: int):
+        """Sample earlier unread rows and keep a contiguous tail; never load skipped bodies."""
+        db = await self._get_db()
+        key = f"proactive_cursor:{session_id}"
+        async with db.execute(
+            "SELECT timestamp, (SELECT CAST(value AS INTEGER) FROM kv_meta WHERE key=?) "
+            "FROM messages_detail WHERE session_id=? AND id=?", (key, session_id, through)
+        ) as cur:
+            anchor = await cur.fetchone()
+        if not anchor or (anchor[1] is not None and through <= anchor[1]):
+            return None
+        since = "" if anchor[1] is not None else (
+            datetime.fromisoformat(anchor[0]) - timedelta(seconds=initial_seconds)
+        ).isoformat()
+        async with db.execute(
+            "SELECT id FROM messages_detail WHERE session_id=? AND id>? AND id<? "
+            "AND timestamp>=? AND is_thinking=0 AND role IN ('user','assistant') ORDER BY id",
+            (session_id, anchor[1] or 0, through, since),
+        ) as cur:
+            ids = [row[0] for row in await cur.fetchall()]
+        tail_count = min(4, max(1, limit // 2), len(ids))
+        earlier_count = len(ids) - tail_count
+        slots = min(earlier_count, limit - tail_count)
+        selected = [ids[i * (earlier_count - 1) // max(1, slots - 1)] for i in range(slots)]
+        selected.extend(ids[earlier_count:])
+        messages = []
+        if selected:
+            placeholders = ",".join("?" for _ in selected)
+            async with db.execute(
+                f"SELECT role,content,name,timestamp,model_spec FROM messages_detail "
+                f"WHERE session_id=? AND id IN ({placeholders}) ORDER BY id", (session_id, *selected)
+            ) as cur:
+                messages = [Message(role=r, content=c, name=n, timestamp=t, model_spec=m)
+                            for r, c, n, t, m in await cur.fetchall()]
+        return messages, earlier_count, slots
+
+    async def advance_proactive_cursor(self, session_id: str, through: int):
+        async with measured_write_lock(self._write_lock, "memory.advance_proactive_cursor"):
+            db = await self._get_db()
+            await db.execute(
+                "INSERT INTO kv_meta(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value "
+                "WHERE CAST(kv_meta.value AS INTEGER)<CAST(excluded.value AS INTEGER)",
+                (f"proactive_cursor:{session_id}", str(through)),
+            )
+            await db.commit()
+
     async def get_recent_session_messages(
         self,
         session_id: str,

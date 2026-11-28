@@ -61,6 +61,49 @@ class MemoryReliabilityTests(unittest.IsolatedAsyncioTestCase):
         await self.manager.close()
         self.directory.cleanup()
 
+    async def test_proactive_cursor_advances_only_on_success_and_preserves_unread_range(self):
+        from src.plugins.llm_chat import planner
+        async def append(minute, text, session="group_77"):
+            cur = await self.db.execute(
+                "INSERT INTO messages_detail(session_id,role,content,timestamp,is_thinking) VALUES (?,'user',?,?,0)",
+                (session, text, f"2026-11-28T10:{minute:02d}:00"),
+            )
+            await self.db.commit()
+            return cur.lastrowid
+
+        first = await append(0, "上一轮触发")
+        await self.manager.advance_proactive_cursor("group_77", first)
+        await append(2, "中间曾经聊过")
+        await append(3, "别的群", "group_78")
+        for minute in range(4, 28):
+            await append(minute, "历史记录" * 80)
+            await append(minute, "同分钟的另一条")
+        await append(29, "紧接触发前的原话")
+        anchor = await append(30, "本轮触发")
+        later = await append(31, "判断期间稍后到达")
+        window = await self.manager.proactive_window("group_77", anchor, 6, 1800)
+        self.assertEqual(len(window[0]), 6)
+        preview = planner._format_proactive_window(window, 400)
+        self.assertLessEqual(len(preview), 400)
+        self.assertIn("中间曾经聊过", preview)
+        self.assertIn("紧接触发前的原话", preview)
+        model = AsyncMock(side_effect=[RuntimeError("offline"), '{"action":"silent","reason":"话题已结束"}'])
+        with patch.object(planner, "memory_manager", self.manager), patch.object(planner.model_manager, "chat", model):
+            args = dict(session_id="group_77", group_id=77, current_message="本轮触发",
+                        mode="proactive", is_direct=False, unread_through=anchor, current_source_ids=(anchor,))
+            with self.assertRaises(RuntimeError):
+                await planner.plan_chat_action(**args)
+            await planner.plan_chat_action(**args)
+        prompt = model.await_args.args[0][0].content
+        self.assertIn("中间曾经聊过", prompt)
+        self.assertIn("紧接触发前的原话", prompt)
+        self.assertNotIn("别的群", prompt)
+        self.assertNotIn("判断期间稍后到达", prompt)
+        self.assertNotIn("上一轮触发", prompt)
+        self.assertEqual(prompt.count("本轮触发"), 1)
+        self.assertIsNone(await self.manager.proactive_window("group_77", anchor, 6, 1800))
+        self.assertEqual(await self.manager.proactive_window("group_77", later, 6, 1800), ([], 0, 0))
+
     async def scalar(self, sql, params=()):
         async with self.db.execute(sql, params) as cursor:
             return (await cursor.fetchone())[0]
