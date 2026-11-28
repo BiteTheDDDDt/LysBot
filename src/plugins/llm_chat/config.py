@@ -268,6 +268,8 @@ def get_tool_usage_prompt(
         return base + "\n本轮媒体能力未配置，以文字说明，不承诺发送。"
     if required_tool == "send_voice":
         media_prompt = VOICE_TOOL_USAGE_PROMPT
+    elif required_tool == "send_web_image":
+        media_prompt = "\n先用 search_web_images 找已有图片，按标题选符合主体和场景的候选，再用 send_web_image 发图。可用原名或英文名改查；没有合适的候选时留空。\n"
     elif required_tool == "generate_image":
         media_prompt = IMAGE_TOOL_USAGE_PROMPT
         if role_available("search"):

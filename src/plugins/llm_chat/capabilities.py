@@ -388,6 +388,12 @@ FACT_CHECK_TOOL = {
     },
 }
 
+def _image_lookup_tool(name, description, param):
+    return {"type": "function", "function": {"name": name, "description": description,
+            "parameters": {"type": "object", "properties": {param: {"type": "string", "maxLength": 200}},
+                           "required": [param], "additionalProperties": False}}}
+
+
 CAPABILITIES = {
     cap.name: cap
     for cap in (
@@ -397,6 +403,8 @@ CAPABILITIES = {
         Capability(POKE_TOOL),
         Capability(VOICE_TOOL, media=True),
         Capability(IMAGE_GENERATION_TOOL, media=True),
+        Capability(_image_lookup_tool("search_web_images", "搜索 Wikimedia Commons 现有图片，返回候选标题和 ID。只填写公开对象和画面特征。", "query"), read_only=True),
+        Capability(_image_lookup_tool("send_web_image", "发送本轮搜图候选中选定的一张原有图片；没有匹配时 image_id 留空。", "image_id"), media=True),
         Capability(RECALL_HISTORY_TOOL, read_only=True, memory_scoped=True),
         Capability(GROUP_FACTS_TOOL, read_only=True),
         Capability(READ_HISTORY_TOOL, read_only=True, memory_scoped=True, agentic_only=True),

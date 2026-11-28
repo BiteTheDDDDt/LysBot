@@ -36,7 +36,7 @@ async def deliver_once(send, *, session_id=None):
     return "sent", receipt
 
 
-async def deliver_media(bot, *, group_id, user_id, media_type, data, addressing: QQAddressing = QQAddressing()):
+async def deliver_media(bot, *, group_id, user_id, media_type, data, caption: str = "", addressing: QQAddressing = QQAddressing()):
     """Send an already generated artifact, independently from its producer."""
     from nonebot.adapters.onebot.v11 import Message, MessageSegment
     from .agent_runner import record_tool_delivery
@@ -45,6 +45,8 @@ async def deliver_media(bot, *, group_id, user_id, media_type, data, addressing:
         raise ValueError(f"Unsupported media type: {media_type}")
     segment = MessageSegment.image(data) if media_type == "image" else MessageSegment.record(data)
     message = addressing.prefix(include_reply=media_type != "image") + segment if group_id else Message([segment])
+    if caption:
+        message.append(MessageSegment.text("\n" + caption))
     async def send():
         if group_id:
             return await bot.send_group_msg(group_id=group_id, message=message)

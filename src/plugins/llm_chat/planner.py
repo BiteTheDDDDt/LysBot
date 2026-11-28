@@ -20,10 +20,11 @@ from .reply_policy import REPLY_MODE_GUIDANCE
 CHAT_ACTIONS = ("reply", "close", "silent", "wait")
 NON_REPLY_ACTIONS = {"silent", "wait"}
 TOPIC_STATES = {"active", "closing", "exhausted"}
-REPLY_PART_TYPES = {"text", "meme", "image", "voice"}
-MEDIA_PART_TYPES = {"image", "voice"}
+REPLY_PART_TYPES = {"text", "meme", "image", "web_image", "voice"}
+MEDIA_PART_TYPES = {"image", "web_image", "voice"}
 MEDIA_PART_TO_TOOL = {
     "image": "generate_image",
+    "web_image": "send_web_image",
     "voice": "send_voice",
 }
 TOOL_TO_MEDIA_PART = {
@@ -578,12 +579,13 @@ async def plan_chat_action(
 
     allowed_media = {
         "voice": not idle and role_available("tts"),
+        "web_image": not idle,
         "image": not idle and role_available("image_gen"),
     }
     reaction_policy = meme_topics = ""
-    part_example = '{"type":"text|image|voice"}'
+    part_example = '{"type":"text|image|web_image|voice"}'
     if group_id:
-        part_example = '{"type":"text|meme|image|voice","topic":"仅 meme 时填写"}'
+        part_example = '{"type":"text|meme|image|web_image|voice","topic":"仅 meme 时填写"}'
         meme_topics = f"\nmeme 可用类别：{'、'.join(sorted(ALLOWED_TOPICS))}"
         reaction_policy = """
 已经决定接话时，接梗、震惊、无语、自嘲或庆祝，优先用一张贴切的反应图。只发表情也是完整回复，例如 parts=[{"type":"meme","topic":"shock"}]。
@@ -602,7 +604,7 @@ wait 用于对方明显还没说完，系统会重新读取最近对话。close 
 poke 是独立动作。结合语境选目标，主动模式只用 sender；被戳也可以接话、发表情或沉默。
 reason 记录哪句原话或互动让这个动作合适。收到语气反馈时先理解对方想怎样聊；有具体误解、冒犯或失误时才需要回应那件事。
 parts 是暂定的可见输出，最多两项。需要回答问题或补充具体信息时用 text。{reaction_policy}
-需要图或声音才用 image/voice，放第一项，之后可暂定一条文字；能力询问、引用中的请求或讨论既有媒体仍用 text。
+找已有照片、作品图片或实物图用 web_image；创作或改图用 image，发语音用 voice。媒体放第一项，之后可暂定一条文字；能力询问、引用中的请求或讨论既有媒体仍用 text。
 语音意图：{VOICE_INTENT_POLICY}
 {REPLY_MODE_GUIDANCE}
 {UNSOLICITED_IMAGE_POLICY if proactive or not is_direct else ""}
@@ -624,7 +626,7 @@ parts 是暂定的可见输出，最多两项。需要回答问题或补充具�
     prompt = f"""你是 QQ 群聊的参与规划器。先选择动作，再提供必要的交接信息。只输出一个 JSON 对象。
 可选 action：{' | '.join(actions)}
 {policy}{meme_topics}
-已配置的生成工具：{', '.join(name for name, available in allowed_media.items() if available) or '无'}。需要调用未配置的生成工具时用文字说明。
+可用媒体类型：{', '.join(name for name, available in allowed_media.items() if available) or '无'}。需要调用不可用的媒体类型时用文字说明。
 wait_seconds 上限：{config.planner_wait_max_seconds}
 格式：
 {{

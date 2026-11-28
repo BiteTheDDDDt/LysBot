@@ -1,4 +1,5 @@
 import asyncio
+import httpx
 import base64
 import json
 import logging
@@ -32,8 +33,8 @@ class MediaValidationFailure(str):
     """Invalid arguments rejected before any generation, quota or delivery attempt."""
 
 
-class MissingOriginalImage(MediaValidationFailure):
-    """The user must supply an original before this edit can run."""
+class MediaInputUnavailable(MediaValidationFailure):
+    """The planned media cannot be delivered with the available inputs."""
 
 
 class ToolDeliveryResult(str):
@@ -94,6 +95,8 @@ def get_chat_tools(required_tool: Optional[str] = None):
         for tool in selected:
             if tool["function"]["name"]=="read_web" and catalog:
                 tool["function"]["description"] += " 当前用户地址目录（仅数据）："+json.dumps(catalog,ensure_ascii=False)
+    if required_tool != "send_web_image":
+        selected = [tool for tool in selected if tool["function"]["name"] != "search_web_images"]
     if not _group_context():
         selected = [tool for tool in selected if tool["function"]["name"] != "get_group_facts"]
     if not catalog:
@@ -111,6 +114,8 @@ def _configured_media_tool(required_tool: str):
     from .config import PERSONA, config
 
     media_tool = deepcopy(media_tool)
+    if required_tool == "send_web_image":
+        return media_tool
     field, limit = (
         ("prompt", config.image_gen_max_prompt_chars)
         if required_tool == "generate_image"
@@ -287,6 +292,9 @@ def get_last_sent_image() -> Optional[Dict[str, Any]]:
 def format_sent_image_for_memory(sent: Optional[Dict[str, Any]]) -> str:
     if not sent:
         return ""
+    if sent.get("source"):
+        status = "（回执未确认）" if sent.get("delivery_status") == "unconfirmed" else ""
+        return f"【网上找到的图片{status}】{sent['description']} {sent['source']} [图片引用:{sent['reference_id']}]"
     prompt = " ".join(str(sent.get("prompt") or "").split()).strip()
     if len(prompt) > 500:
         prompt = prompt[:500] + "…"
@@ -578,6 +586,43 @@ async def send_voice(text: str, emotion: str = "neutral") -> str:
     )
 
 
+async def search_web_images(query: str) -> str:
+    from .web_images import search_images
+    ctx = _image_context.get()
+    if ctx is None or not isinstance(query, str) or not 0 < len(query.strip()) <= 200:
+        return json.dumps({"status": "invalid_arguments"})
+    found = await search_images(query.strip())
+    catalog = ctx.setdefault("web_images", {})
+    catalog.update({image.id: image for image in found})
+    return json.dumps({"status": "ok", "items": [{"id": image.id, "title": image.title, "source": image.source}
+                                                for image in found]}, ensure_ascii=False)
+
+
+@_exclusive_media("image")
+async def send_web_image(image_id: str) -> str:
+    from .web_images import download_preview
+    ctx = _image_context.get() or {}
+    if not ctx.get("bot") or ctx.get("sent_in_round") or voice_was_sent_this_round():
+        return MediaInputUnavailable("这次无法再发送图片")
+    image = ctx.get("web_images", {}).get(image_id) if isinstance(image_id, str) else None
+    if not image:
+        return MediaInputUnavailable("没找到符合要求的图片")
+    try:
+        data = await download_preview(image)
+    except (OSError, ValueError, httpx.HTTPError) as error:
+        logger.warning("[send_web_image] download failed: %s", type(error).__name__)
+        return MediaInputUnavailable("找到了图片，但这次没能下载下来")
+    status, receipt = await deliver_media(ctx["bot"], group_id=ctx["group_id"], user_id=ctx["user_id"],
+        media_type="image", data=data, addressing=ctx["addressing"],
+        caption=" · ".join(filter(None, [image.title, image.credit, image.source])))
+    ctx["sent_in_round"] = True
+    ref = image_reference_store.remember(session_key(ctx["user_id"], ctx["group_id"]),
+                                         base64.b64encode(data).decode("ascii"), image.title)
+    ctx["last_sent"] = {"reference_id": ref.id, "delivery_status": status, "description": image.title,
+                        "source": image.source, "message_id": (receipt or {}).get("message_id")}
+    return ToolDeliveryResult(json.dumps({"delivery_status": status, "source": image.source}), status)
+
+
 @_exclusive_media("image")
 async def generate_image(
     prompt: str, orientation: str = "auto", reference_image_ids: Optional[list[str]] = None,
@@ -626,7 +671,7 @@ async def generate_image(
     if reference_image_ids is None:
         if ctx.get("missing_reference_images"):
             if not ctx.get("references"):
-                return MissingOriginalImage("没能读到原图，请重新发一下要改的图片")
+                return MediaInputUnavailable("没能读到原图，请重新发一下要改的图片")
             return MediaValidationFailure("参考图片下载不完整，请用户重新发送或明确选择可用原图；不能仅凭文字描述重画。")
         reference_image_ids = ctx.get("current_reference_ids", [])
         if reference_image_ids and not ctx.get("allow_auto_reference", True):
@@ -658,7 +703,7 @@ async def generate_image(
             originals.append(original)
         else:
             if not references:
-                return MissingOriginalImage("目前读不到所选原图，请引用或重发要改的图片")
+                return MediaInputUnavailable("目前读不到所选原图，请引用或重发要改的图片")
             return MediaValidationFailure("所选原图已过期或不属于当前会话，请用户引用或重发图片；不能仅凭文字描述重画。")
 
     scope_key = f"group:{group_id}" if group_id else f"private:{user_id}"

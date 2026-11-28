@@ -664,7 +664,7 @@ class AgentRunner:
     ):
         from .model_types import ChatResponse, _add_usage, _extract_openai_usage
         from .model_adapters import _strip_fake_tool_calls
-        from .tools import MediaValidationFailure, MissingOriginalImage, execute_tool, image_was_sent_this_round, voice_was_sent_this_round
+        from .tools import MediaValidationFailure, MediaInputUnavailable, execute_tool, image_was_sent_this_round, voice_was_sent_this_round
 
         client, kwargs, formatted, supports_tools, selected_tools = backend.prepare_request(
             messages, extra_body, tools_enabled, required_tool,
@@ -824,7 +824,7 @@ class AgentRunner:
                         )
                         if is_media:
                             media_attempted = True
-                            if isinstance(tool_result, MissingOriginalImage):
+                            if isinstance(tool_result, MediaInputUnavailable):
                                 media_failure_reply = str(tool_result)
                             elif isinstance(tool_result, MediaValidationFailure):
                                 retryable_media_tool = func_name

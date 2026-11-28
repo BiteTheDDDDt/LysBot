@@ -43,7 +43,8 @@ async def execute_model_call(
             "summary": config.summary_total_timeout,
             "chat": config.chat_turn_timeout,
         }.get(effective_role, config.background_llm_total_timeout)
-        if effective_role == "chat" and required_tool in {"generate_image", "send_voice"}:
+        from .capabilities import MEDIA_TOOLS
+        if effective_role == "chat" and required_tool in MEDIA_TOOLS:
             budget = max(float(budget), float(config.chat_media_turn_timeout))
         budget = max(0.1, float(budget))
         if _orchestrate:

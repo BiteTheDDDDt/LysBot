@@ -27,6 +27,8 @@ class ModelTurnTimeout(asyncio.TimeoutError):
 
     @property
     def user_message(self) -> str:
+        if self.required_tool == "send_web_image":
+            return "这次找图等太久了，还没拿到结果。"
         if self.required_tool == "generate_image":
             return "这次图片生成等太久了，还没拿到结果。"
         if self.required_tool == "send_voice":
