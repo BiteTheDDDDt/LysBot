@@ -142,7 +142,8 @@ class QueuedNotificationTests(unittest.IsolatedAsyncioTestCase):
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock,patch
-os.environ.update(LLM_CHAT_DATA_DIR=sys.argv[1],LLM_CHAT_DATABASE_PATH=str(Path(sys.argv[1])/'history.db'))
+os.environ.update(LLM_CHAT_DATA_DIR=sys.argv[1], LLM_CHAT_DATABASE_PATH=str(Path(sys.argv[1])/'history.db'),
+                  ONEBOT_PRIMARY_QQ='', ONEBOT_STANDBY_QQ='')
 import nonebot
 nonebot.init(superusers={'10001'})
 plugin=nonebot.load_plugin('examples.queued_notifications')
@@ -150,23 +151,47 @@ assert plugin is not None
 worker=plugin.module
 from examples.queued_notifications.storage import enqueue
 from nonebot_plugin_apscheduler import scheduler
+from src.onebot_accounts import accounts
 assert scheduler.get_job('queued_notifications') is not None
 root=Path(sys.argv[1])/'queued_notifications'
 enqueue(root,'report','Synthetic report complete')
 path=next((root/'pending').glob('*.json'))
 payload=json.loads(path.read_text());payload['recipient']='99999';path.write_text(json.dumps(payload))
-bot=SimpleNamespace(send_private_msg=AsyncMock(return_value={'message_id':42}))
+def simulated_bot(self_id):
+    return SimpleNamespace(
+        self_id=self_id,
+        get_status=AsyncMock(return_value={'online': True, 'good': True}),
+        send_private_msg=AsyncMock(return_value={'message_id': 42}),
+    )
+
 async def run():
- with patch('src.onebot_accounts.get_bots',return_value={'10002':bot}):
-  await worker.deliver_pending();await worker.deliver_pending()
- bot.send_private_msg.assert_awaited_once()
- assert bot.send_private_msg.call_args.kwargs['user_id']==10001
- enqueue(root,'later','Another report')
- for bots in [{},{'10002':bot,'10003':bot}]:
-  with patch('src.onebot_accounts.get_bots',return_value=bots):await worker.deliver_pending()
- assert bot.send_private_msg.await_count==1
- assert len(list((root/'receipts').glob('*.json')))==1
- print('PLUGIN_INTEGRATION_OK')
+    bot = simulated_bot('10002')
+    bots = {bot.self_id: bot}
+    with patch('src.onebot_accounts.get_bots', return_value=bots):
+        accounts.connection_opened(bot)
+        await worker.deliver_pending()
+        bot.send_private_msg.assert_not_awaited()
+        await accounts.observe(bots, 1)
+        await worker.deliver_pending()
+        await worker.deliver_pending()
+        bot.send_private_msg.assert_awaited_once()
+        assert bot.send_private_msg.call_args.kwargs['user_id'] == 10001
+
+        enqueue(root, 'later', 'Another report')
+        bots.clear()
+        accounts.connection_closed(bot)
+        await worker.deliver_pending()
+        for handle in (simulated_bot(bot.self_id), simulated_bot('10003')):
+            bots[handle.self_id] = handle
+            accounts.connection_opened(handle)
+        await accounts.observe(bots, 2)
+        await worker.deliver_pending()
+        for handle in bots.values():
+            handle.send_private_msg.assert_not_awaited()
+
+    assert bot.send_private_msg.await_count == 1
+    assert len(list((root/'receipts').glob('*.json'))) == 1
+    print('PLUGIN_INTEGRATION_OK')
 asyncio.run(run())
 '''
         result = subprocess.run([sys.executable, "-c", code, str(self.root)], capture_output=True,

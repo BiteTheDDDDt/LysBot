@@ -32,6 +32,7 @@ async def exercise(root, directory, model_port, requests):
         KNOWLEDGE_DIR="knowledge",
         HTTP_PROXY="", HTTPS_PROXY="", ALL_PROXY="", NO_PROXY="127.0.0.1,localhost",
         MASTER_QQ="42", ACCESS_TOKEN="smoke-token", HOST="127.0.0.1", PORT=str(port),
+        ONEBOT_PRIMARY_QQ="", ONEBOT_STANDBY_QQ="",
         MODEL_GENERAL="openai:smoke-general", OPENAI_API_KEY="smoke-not-a-real-key",
         OPENAI_BASE_URL=f"http://127.0.0.1:{model_port}/v1", PYTHONUTF8="1",
         LLM_CHAT_DATA_DIR=str(directory / "data"),
@@ -95,9 +96,16 @@ async def exercise(root, directory, model_port, requests):
                                "sex": "unknown", "age": 0, "area": "", "level": "",
                                "role": "member", "title": ""},
                 }
-                await connection.send(json.dumps(event))
+                health = directory / "data" / "health.json"
+
+                async def send_when_online():
+                    while not (health.exists() and json.loads(health.read_text(encoding="utf-8")).get("qq_online") is True):
+                        await asyncio.sleep(0.1)
+                    await connection.send(json.dumps(event))
+
                 reply = None
-                async with asyncio.timeout(35):
+                async with asyncio.timeout(35), asyncio.TaskGroup() as traffic:
+                    traffic.create_task(send_when_online())
                     while reply is None:
                         action = json.loads(await connection.recv())
                         name = action.get("action")
@@ -133,7 +141,20 @@ async def exercise(root, directory, model_port, requests):
                     assert not names & {"search_web", "send_voice", "generate_image"}
                 assert any(message.get("role") == "tool" and "extension_owner_verified" in str(message.get("content"))
                            for item in requests for message in item.get("messages", [])), "Extension was not executed"
-                print(f"PASS: real startup, OneBot message/reply, {len(requests)} general-model calls, live group card read, master extension executed")
+                await connection.send(json.dumps({
+                    "time": int(time.time()), "self_id": 999, "post_type": "notice",
+                    "notice_type": "bot_offline", "user_id": 999, "tag": "smoke", "message": "test offline",
+                }))
+                async with asyncio.timeout(20):
+                    while True:
+                        snapshot = json.loads(health.read_text(encoding="utf-8"))
+                        if snapshot["account_statuses"].get("999") == "blocked":
+                            break
+                        await asyncio.sleep(0.1)
+                assert snapshot["qq_online"] is False
+                state = directory / "data" / "onebot-accounts.json"
+                assert "999" in json.loads(state.read_text(encoding="utf-8"))["blocked"]
+                print(f"PASS: real startup, OneBot message/reply, {len(requests)} general-model calls, live group card read, master extension executed, forced offline persisted")
         except Exception:
             print(f"Smoke-test log: {log_path}")
             print("\n".join(log_path.read_text(encoding="utf-8", errors="replace").splitlines()[-30:]))

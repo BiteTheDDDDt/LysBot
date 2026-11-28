@@ -1,9 +1,12 @@
 """Account ownership for a single-process OneBot deployment."""
 
+import asyncio
 import json
 import os
 import time
 from contextvars import ContextVar
+from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
 
 from nonebot import get_bots, logger
@@ -15,6 +18,34 @@ from nonebot.message import event_preprocessor
 _sending_account_alert = ContextVar("sending_account_alert", default=False)
 
 
+class AccountStatus(StrEnum):
+    UNKNOWN = "unknown"
+    ONLINE = "online"
+    OFFLINE = "offline"
+    DEGRADED = "degraded"
+    BLOCKED = "blocked"
+
+
+@dataclass(frozen=True, eq=False)
+class AccountSession:
+    bot: Bot | None
+    status: AccountStatus
+
+
+async def probe_status(bot):
+    try:
+        async with asyncio.timeout(3):
+            result = await bot.get_status()
+    except Exception:
+        return AccountStatus.UNKNOWN
+    if isinstance(result, dict):
+        if result.get("online") is False:
+            return AccountStatus.OFFLINE
+        if result.get("online") is True:
+            return AccountStatus.DEGRADED if result.get("good") is False else AccountStatus.ONLINE
+    return AccountStatus.UNKNOWN
+
+
 class Accounts:
     def __init__(self, primary, standby, path):
         self.primary, self.standby, self.path = primary, standby, path
@@ -23,21 +54,23 @@ class Accounts:
             raise ValueError("Configure two different numeric ONEBOT_PRIMARY_QQ and ONEBOT_STANDBY_QQ")
         self.active = primary
         self.groups = set()
-        self.blocked = set()
+        self._sessions: dict[str, AccountSession] = {}
+        self._observe_lock = asyncio.Lock()
+        self.connections_changed = asyncio.Event()
         self.cutover = 0
         self.pending = []
-        self.online = {}
         self.down_since = None
         self.next_refresh = 0
         self.awaiting_preferred = False
         self.served = set()
         self.outage_reported = False
-        if self.enabled and path.exists():
+        if path.exists():
             state = json.loads(path.read_text(encoding="utf-8"))
-            if state["pair"] == [primary, standby]:
+            for account in state["blocked"]:
+                self._sessions[account] = AccountSession(None, AccountStatus.BLOCKED)
+            if self.enabled and state["pair"] == [primary, standby]:
                 self.active = state["active"]
                 self.groups = set(state["groups"])
-                self.blocked = set(state["blocked"])
                 self.cutover = state["cutover"]
                 self.pending = state["pending"]
                 self.awaiting_preferred = state.get("awaiting_preferred", False)
@@ -71,48 +104,122 @@ class Accounts:
         self.pending.append(message)
         self.save()
 
+    @property
+    def blocked(self):
+        return {key for key, session in self._sessions.items() if session.status == AccountStatus.BLOCKED}
+
+    def statuses(self):
+        accounts = (self.primary, self.standby) if self.enabled else self._sessions
+        return {key: self.status(key) for key in accounts}
+
+    def status(self, account):
+        session = self._sessions.get(account)
+        return session.status if session else AccountStatus.UNKNOWN
+
+    def connection_opened(self, bot):
+        status = AccountStatus.BLOCKED if self.status(bot.self_id) == AccountStatus.BLOCKED else AccountStatus.UNKNOWN
+        self._sessions[bot.self_id] = AccountSession(bot, status)
+        self.connections_changed.set()
+
+    def connection_closed(self, bot):
+        session = self._sessions.get(bot.self_id)
+        if session and session.bot is bot:
+            status = AccountStatus.BLOCKED if session.status == AccountStatus.BLOCKED else AccountStatus.OFFLINE
+            self._sessions[bot.self_id] = AccountSession(None, status)
+            self.connections_changed.set()
+
+    def session_offline(self, bot):
+        session = self._sessions.get(bot.self_id)
+        if session and session.bot is bot and session.status != AccountStatus.BLOCKED:
+            self._sessions[bot.self_id] = AccountSession(bot, AccountStatus.OFFLINE)
+
     def forced_offline(self, account):
-        if account in (self.primary, self.standby) and account not in self.blocked:
-            self.blocked.add(account)
-            self.notice(f"QQ {account} 收到平台强制下线通知，请检查该账号；已暂停它的群投递。")
+        if self.enabled and account not in (self.primary, self.standby):
+            return
+        session = self._sessions.get(account)
+        if self.status(account) != AccountStatus.BLOCKED:
+            self._sessions[account] = AccountSession(session.bot if session else None, AccountStatus.BLOCKED)
+            self.connections_changed.set()
+            message = f"QQ {account} 收到平台强制下线通知，已暂停该账号的群、私聊及后台业务。"
+            if self.enabled:
+                self.notice(message)
+            else:
+                logger.warning(message)
+                self.save()
 
     def owns(self, account, group=None):
-        return not self.enabled or (
-            account == self.active
-            and account not in self.blocked
-            and (not self.cutover or group is None or int(group) in self.served)
-        )
+        if self.status(account) == AccountStatus.BLOCKED:
+            return False
+        if not self.enabled:
+            return True
+        return account == self.active and (not self.cutover or group is None or int(group) in self.served)
 
-    async def observe(self, bots, states, now):
-        self.online = states.copy()
-        if not self.groups and not self.cutover and not self.blocked:
-            primary_offline = self.primary not in bots or states.get(self.primary) is False
-            if primary_offline and states.get(self.standby) is True:
-                groups = await memberships(bots[self.standby])
-                if groups and not self.blocked:
-                    self.active = self.standby
-                    self.groups = self.served = groups
-                    self.awaiting_preferred = True
-                    self.save()
-        if states.get(self.active) is True and not self.cutover and now >= self.next_refresh:
+    def is_current(self, bot):
+        session = self._sessions.get(bot.self_id)
+        return bool(session and session.bot is bot)
+
+    def is_online(self, bot):
+        session = self._sessions.get(bot.self_id)
+        return bool(session and session.bot is bot and session.status == AccountStatus.ONLINE)
+
+    def can_serve(self, bot, group=None):
+        return self.is_online(bot) and self.owns(bot.self_id, group)
+
+    async def observe(self, bots, now):
+        async with self._observe_lock:
+            await asyncio.gather(*(self._probe(bot) for bot in bots.values()))
+            if self.enabled:
+                await self._update_route(now)
+
+    async def _probe(self, bot):
+        session = self._sessions.get(bot.self_id)
+        if session is None or session.bot is not bot or session.status == AccountStatus.BLOCKED:
+            return
+        status = await probe_status(bot)
+        # Connection changes and offline notices supersede an outstanding probe.
+        if self._sessions.get(bot.self_id) is session:
+            self._sessions[bot.self_id] = AccountSession(bot, status)
+
+    async def _memberships(self, account):
+        # Routing depends on both accounts. Discard this read if either changes while waiting.
+        before = tuple(self._sessions.get(key) for key in (self.primary, self.standby))
+        session = self._sessions.get(account)
+        if session is None or session.status != AccountStatus.ONLINE:
+            return None
+        groups = await memberships(session.bot)
+        if before == tuple(self._sessions.get(key) for key in (self.primary, self.standby)):
+            return groups
+        return None
+
+    def _disconnected(self, account):
+        session = self._sessions.get(account)
+        return session is None or session.status == AccountStatus.OFFLINE
+
+    async def _update_route(self, now):
+        if not self.groups and not self.cutover and self._disconnected(self.primary):
+            groups = await self._memberships(self.standby)
+            if groups:
+                self.active = self.standby
+                self.groups = self.served = groups
+                self.awaiting_preferred = True
+                self.save()
+        if self.status(self.active) == AccountStatus.ONLINE and not self.cutover and now >= self.next_refresh:
             self.next_refresh = now + 60
-            groups = await memberships(bots[self.active])
+            groups = await self._memberships(self.active)
             if groups is not None and groups != self.groups:
                 self.groups = self.served = groups
                 self.save()
         other = self.standby if self.active == self.primary else self.primary
         prefer = self.awaiting_preferred and other == self.primary
-        if states.get(self.active) is True or self.active in self.blocked:
-            self.down_since = None
-        elif self.active not in bots or states.get(self.active) is False:
+        if self._disconnected(self.active):
             if self.down_since is None:
                 self.down_since = now
         else:
             self.down_since = None
         due = self.down_since is not None and now - self.down_since >= 90
-        if (due or prefer) and states.get(other) is True and not self.blocked:
-            groups = await memberships(bots[other])
-            if groups and not self.blocked and (common := self.groups & groups):
+        if (due or prefer) and self.status(self.active) != AccountStatus.BLOCKED:
+            groups = await self._memberships(other)
+            if groups and (common := self.groups & groups):
                 previous = self.active
                 self.active = other
                 self.served = common
@@ -131,9 +238,8 @@ class Accounts:
         if self.pending:
             sender = next(
                 (
-                    bots[i]
-                    for i in (self.active, self.standby, self.primary)
-                    if states.get(i) is True and i not in self.blocked
+                    self._sessions[i].bot for i in (self.active, other)
+                    if self.status(i) == AccountStatus.ONLINE
                 ),
                 None,
             )
@@ -166,29 +272,42 @@ accounts = Accounts(
 
 
 def active_bots():
-    bots = get_bots()
-    return {k: v for k, v in bots.items() if accounts.owns(k) and accounts.online.get(k) is True} if accounts.enabled else bots
+    return {key: bot for key, bot in get_bots().items() if accounts.can_serve(bot)}
 
 
 @event_preprocessor
 async def account_events(bot: Bot, event: Event):
-    if not accounts.enabled:
-        return
     if getattr(event, "notice_type", None) == "bot_offline":
         accounts.forced_offline(bot.self_id)
+    elif getattr(event, "notice_type", None) == "bot_status" and getattr(event, "sub_type", None) == "offline":
+        accounts.session_offline(bot)
     group = getattr(event, "group_id", None)
     if event.post_type != "meta_event" and (
-        not accounts.owns(bot.self_id, group)
-        or getattr(event, "user_id", None) in (int(accounts.primary), int(accounts.standby))
-        or event.time <= accounts.cutover
+        not accounts.can_serve(bot, group)
+        or (accounts.enabled and (
+            getattr(event, "user_id", None) in (int(accounts.primary), int(accounts.standby))
+            or event.time <= accounts.cutover
+        ))
     ):
         raise IgnoredException("event outside service account ownership")
 
 
 class AccountAdapter(Adapter):
+    def bot_connect(self, bot):
+        super().bot_connect(bot)
+        accounts.connection_opened(bot)
+
+    def bot_disconnect(self, bot):
+        if self.bots.get(bot.self_id) is bot:
+            accounts.connection_closed(bot)
+            super().bot_disconnect(bot)
+
     async def _call_api(self, bot, api, **data):
-        group = data.get("group_id")
-        alert = api == "send_private_msg" and _sending_account_alert.get()
-        if not alert and not api.startswith(("get_", "can_")) and not accounts.owns(bot.self_id, group):
-            raise RuntimeError("action outside service account ownership")
+        if not accounts.is_current(bot):
+            raise RuntimeError("action from an expired account connection")
+        if api not in {"get_status", "get_login_info"} and not accounts.can_serve(bot, data.get("group_id")):
+            alert = (api == "send_private_msg" and _sending_account_alert.get()
+                     and str(data.get("user_id")) == os.getenv("MASTER_QQ"))
+            if not (accounts.is_online(bot) and (api == "get_group_list" or alert)):
+                raise RuntimeError("action outside available service account")
         return await super()._call_api(bot, api, **data)
